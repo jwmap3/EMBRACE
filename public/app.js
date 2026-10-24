@@ -3,7 +3,18 @@
   'use strict';
 
   var VERSION = '3.0';
-  var RANKS = ['Elder', 'Ministerial Servant', 'Regular Pioneer', 'Auxiliary Pioneer', 'Publisher', 'Inactive', 'Removed'];
+  // A person has one privilege, an optional pioneer status, and any number of roles.
+  var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
+  var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
+  var ROLES = ['Coordinator', 'Secretary', 'Service Overseer', 'Group Overseer'];
+  // Older records kept the pioneer status in the privilege field.
+  function norm(p) {
+    var q = Object.assign({ pioneer: '', roles: [] }, p);
+    if (q.rank === 'Regular Pioneer' || q.rank === 'Auxiliary Pioneer' || q.rank === 'Special Pioneer') { q.pioneer = q.pioneer || q.rank; q.rank = 'Publisher'; }
+    if (!q.rank) q.rank = 'Publisher';
+    if (!Array.isArray(q.roles)) q.roles = [];
+    return q;
+  }
   var STATUS = {
     fresh: { label: 'Visited', long: 'Visited recently', color: 'var(--st-fresh)' },
     soon: { label: 'Due soon', long: 'Due for a visit soon', color: 'var(--st-soon)' },
@@ -59,14 +70,24 @@
   function od() { return +(S.data.settings && S.data.settings.overdueDays) || 180; }
   function odText() { var d = od(); return d >= 365 ? 'year' : Math.round(d / 30) + ' months'; }
   function isActive(p) { return p.rank !== 'Inactive' && p.rank !== 'Removed'; }
-  function isPriority(p) { return isActive(p) && (p.rank === 'Elder' || p.rank === 'Ministerial Servant' || p.rank === 'Regular Pioneer' || !!p.appointedWife); }
+  function isPriority(p) {
+    return isActive(p) && (p.rank === 'Elder' || p.rank === 'Ministerial Servant' || p.pioneer === 'Regular Pioneer' || p.pioneer === 'Special Pioneer' || !!p.appointedWife);
+  }
+  function titles(p) {
+    var t = [];
+    if (p.rank && p.rank !== 'Publisher') t.push(p.rank);
+    (p.roles || []).forEach(function (r) { t.push(r); });
+    if (p.pioneer) t.push(p.pioneer);
+    if (p.appointedWife) t.push('Appointed wife');
+    return t;
+  }
   function pub(id) { for (var i = 0; i < S.data.publishers.length; i++) if (S.data.publishers[i].id === id) return S.data.publishers[i]; return null; }
   function visit(id) { for (var i = 0; i < S.data.visits.length; i++) if (S.data.visits[i].id === id) return S.data.visits[i]; return null; }
   function me() { return S.meId ? pub(S.meId) : null; }
   function elders() { return S.data.publishers.filter(function (p) { return p.rank === 'Elder'; }).sort(byName); }
   function stamp(t) { return !t ? 0 : typeof t === 'number' ? t : t.toMillis ? t.toMillis() : 0; }
   function visitOrder(a, b) { return a.date !== b.date ? (a.date < b.date ? 1 : -1) : stamp(b.createdAt) - stamp(a.createdAt); }
-  function who(v) { return (v.elders || []).join(' & ') || '—'; }
+  function who(v) { return (v.elders || []).join(' & ') || 'Recorded before Embrace'; }
   function greeting() { var h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; }
 
   function rebuild() {
@@ -131,9 +152,7 @@
 
   /* ---------------- pieces ---------------- */
   function subline(p) {
-    var bits = [];
-    if (p.rank && p.rank !== 'Publisher') bits.push(p.rank);
-    if (p.appointedWife) bits.push('Appointed wife');
+    var bits = titles(p);
     var l = last(p); if (l && l.followUp) bits.push('Follow up');
     return bits.join(' · ');
   }
@@ -280,7 +299,8 @@
 
   function viewPerson(p) {
     var vs = idx.byPub[p.id] || [], l = vs[0], w = l ? daysSince(l.date) : null, st = state(p);
-    var sub = [p.rank || 'Publisher', p.appointedWife ? 'Appointed wife' : '', p.group ? p.group + ' group' : ''].filter(Boolean).join(' · ');
+    var t = titles(p);
+    var sub = (t.length ? t : ['Publisher']).concat(p.group ? [p.group + ' group'] : []).join(' · ');
     var frac = w === null ? 1 : Math.min(1, Math.max(0.02, w / od()));
     var arc = '<svg class="arc" viewBox="0 0 116 116" aria-hidden="true"><circle cx="58" cy="58" r="54" fill="none" stroke="var(--fill)" stroke-width="5"/>' +
       '<circle cx="58" cy="58" r="54" fill="none" stroke="' + STATUS[st].color + '" stroke-width="5" stroke-linecap="round" pathLength="100" stroke-dasharray="' + (frac * 100) + ' 100"/></svg>';
@@ -456,7 +476,11 @@
       '<div class="glass list">' +
       '<div class="field"><label for="p-name">Name</label><input id="p-name" type="text" value="' + esc(p.name) + '" placeholder="Full name" autocomplete="off"></div>' +
       '<div class="field"><label for="p-rank">Privilege</label><select id="p-rank">' + RANKS.map(function (r) { return '<option' + (r === (p.rank || 'Publisher') ? ' selected' : '') + '>' + r + '</option>'; }).join('') + '</select></div>' +
+      '<div class="field"><label for="p-pioneer">Pioneer</label><select id="p-pioneer">' + PIONEERS.map(function (r) { return '<option value="' + r + '"' + (r === (p.pioneer || '') ? ' selected' : '') + '>' + (r || 'No') + '</option>'; }).join('') + '</select></div>' +
       '<label class="field" for="p-wife"><span>Appointed wife</span><input class="switch" id="p-wife" type="checkbox"' + (p.appointedWife ? ' checked' : '') + '></label>' +
+      '<div class="chips" role="group" aria-label="Roles">' + ROLES.map(function (r) {
+        return '<button class="chip" data-action="role" data-role="' + r + '" aria-pressed="' + (S.sheet.roles.indexOf(r) >= 0) + '">' + r + '</button>';
+      }).join('') + '</div>' +
       '<div class="field"><label for="p-group">Group</label><input id="p-group" type="text" list="p-groups" value="' + esc(p.group || '') + '" placeholder="Overseer\'s name"></div>' +
       '<datalist id="p-groups">' + idx.groups.map(function (g) { return '<option value="' + esc(g) + '"></option>'; }).join('') + '</datalist>' +
       '<div class="field"><label for="p-note">Note</label><input id="p-note" type="text" value="' + esc(p.note || '') + '" placeholder="e.g. Away until April"></div></div>' +
@@ -469,12 +493,13 @@
     return h;
   }
   function sheetImport(sh) {
-    var g = {}; sh.rows.forEach(function (r) { g[r.group || 'No group'] = (g[r.group || 'No group'] || 0) + 1; });
-    return head('Import', null, 'Close') + '<div class="glass list">' + Object.keys(g).sort().map(function (k) {
-      return '<div class="row-plain"><span>' + esc(k) + '</span><span>' + g[k] + '</span></div>';
+    var ups = sh.updates || [], vs = sh.visits || [];
+    var rows = [['New people', sh.rows.length], ['Privileges updated', ups.length], ['Earlier visits recorded', vs.length], ['Already up to date', sh.skipped]];
+    var any = sh.rows.length || ups.length || vs.length;
+    return head('Import', null, 'Close') + '<div class="glass list">' + rows.map(function (r) {
+      return '<div class="row-plain"><span>' + r[0] + '</span><span>' + r[1] + '</span></div>';
     }).join('') + '</div>' +
-      (sh.skipped ? '<p class="foot">' + sh.skipped + ' already in Embrace will be skipped.</p>' : '') +
-      (sh.rows.length ? '<button class="cta" data-action="do-import">Add ' + sh.rows.length + ' people</button>' : '<p class="foot">Nothing new to add.</p>');
+      (any ? '<button class="cta" data-action="do-import">Bring it in</button>' : '<p class="foot">Everything in this list is already in Embrace.</p>');
   }
   function sheetCode() {
     return head('Congregation Code', '<button class="link" data-action="code-save">Save</button>') +
@@ -598,15 +623,21 @@
     },
     visit: function (el) { openSheet({ type: 'visit', id: el.dataset.id }); },
     'delete-visit': function (el) { store.deleteVisit(el.dataset.id).then(function () { closeSheet(); toast('Visit deleted'); }); },
-    edit: function (el) { openSheet({ type: 'edit', id: el.dataset.id }); },
-    new: function () { openSheet({ type: 'edit', id: null }); },
+    edit: function (el) { var p = pub(el.dataset.id); openSheet({ type: 'edit', id: el.dataset.id, roles: ((p && p.roles) || []).slice() }); },
+    new: function () { openSheet({ type: 'edit', id: null, roles: [] }); },
+    role: function (el) {
+      var r = S.sheet.roles, v = el.dataset.role, i = r.indexOf(v);
+      if (i >= 0) r.splice(i, 1); else r.push(v);
+      el.setAttribute('aria-pressed', String(i < 0));
+    },
     confirm: function () { S.sheet.confirm = true; renderSheet(); },
     unconfirm: function () { S.sheet.confirm = false; renderSheet(); },
     close: function () { closeSheet(); },
     'save-person': function () {
       var name = document.getElementById('p-name').value.trim().replace(/\s+/g, ' ');
       if (!name) return showErr('p-err', 'Type the person\'s name.');
-      var p = { name: name, rank: document.getElementById('p-rank').value, appointedWife: document.getElementById('p-wife').checked,
+      var p = { name: name, rank: document.getElementById('p-rank').value, pioneer: document.getElementById('p-pioneer').value,
+        roles: S.sheet.roles.slice(), appointedWife: document.getElementById('p-wife').checked,
         group: document.getElementById('p-group').value.trim(), note: document.getElementById('p-note').value.trim() };
       if (S.sheet.id) p.id = S.sheet.id;
       store.savePublisher(p).then(function () { closeSheet(); toast(p.id ? 'Saved' : firstName(name) + ' added'); }, fail('p-err'));
@@ -616,7 +647,16 @@
       store.deletePublisher(id).then(function () { S.sheet = null; renderSheet(); S.pubId = null; render(); toast('Removed'); });
     },
     'import-pick': function () { var f = document.getElementById('import-file'); if (f) f.click(); },
-    'do-import': function () { var rows = S.sheet.rows; store.importRoster(rows).then(function () { closeSheet(); S.ringDrawn = false; toast(rows.length + ' people added'); }); },
+    'do-import': function () {
+      var rows = S.sheet.rows, ups = S.sheet.updates || [], vs = S.sheet.visits || [];
+      store.importRoster(rows)
+        .then(function () { return ups.length ? store.updateMany(ups) : null; })
+        .then(function () { return vs.length ? store.addVisits(vs) : null; })
+        .then(function () {
+          closeSheet(); S.ringDrawn = false;
+          toast([rows.length ? rows.length + ' added' : '', ups.length ? ups.length + ' updated' : '', vs.length ? vs.length + ' visits' : ''].filter(Boolean).join(' · ') || 'Nothing changed');
+        }, function (e) { toast(window.EmbraceStore.friendly(e)); });
+    },
     switch: function () { S.meId = null; lsSet('embrace-me', null); S.pubId = null; render(); window.scrollTo(0, 0); },
     iam: function (el) {
       var id = el.dataset.id, p = pub(id);
@@ -683,10 +723,7 @@
     if (t.id === 'import-file' && t.files && t.files[0]) {
       var r = new FileReader();
       r.onload = function () {
-        var rows = parseRoster(String(r.result)), have = {};
-        S.data.publishers.forEach(function (p) { have[p.name.toLowerCase()] = 1; });
-        var fresh = rows.filter(function (p) { return !have[p.name.toLowerCase()]; });
-        openSheet({ type: 'import', rows: fresh, skipped: rows.length - fresh.length }); t.value = '';
+        openSheet(planImport(parseRoster(String(r.result)))); t.value = '';
       };
       r.readAsText(t.files[0]);
     }
@@ -712,9 +749,54 @@
   function normRank(r, status) {
     var s = String(r || '').trim().toLowerCase();
     for (var i = 0; i < RANKS.length; i++) if (RANKS[i].toLowerCase() === s) return RANKS[i];
-    var alias = { rp: 'Regular Pioneer', ap: 'Auxiliary Pioneer', ms: 'Ministerial Servant', 'aux pioneer': 'Auxiliary Pioneer' };
+    var alias = { ms: 'Ministerial Servant', servant: 'Ministerial Servant', rp: 'Regular Pioneer', ap: 'Auxiliary Pioneer', 'aux pioneer': 'Auxiliary Pioneer',
+      'regular pioneer': 'Regular Pioneer', 'auxiliary pioneer': 'Auxiliary Pioneer', 'special pioneer': 'Special Pioneer' };
     if (alias[s]) return alias[s];
-    return /inactive/i.test(status || '') ? 'Inactive' : 'Publisher';
+    return /inactive/i.test(status || '') ? 'Inactive' : /removed/i.test(status || '') ? 'Removed' : 'Publisher';
+  }
+  function normPioneer(s) {
+    s = String(s || '').trim().toLowerCase();
+    if (!s || s === 'no' || s === 'none') return '';
+    if (/^(rp|regular|regular pioneer|pioneer|yes|y)$/.test(s)) return 'Regular Pioneer';
+    if (/^(ap|aux|auxiliary|auxiliary pioneer)$/.test(s)) return 'Auxiliary Pioneer';
+    if (/special/.test(s)) return 'Special Pioneer';
+    return '';
+  }
+  /* Compare an imported list with who is already in Embrace: add new people, update
+     privileges/pioneer/roles of people already here (matched by name), and record any
+     earlier visit dates the list carries. */
+  function planImport(rows) {
+    var byName = {};
+    S.data.publishers.forEach(function (p) { byName[p.name.toLowerCase()] = p; });
+    var fresh = [], updates = [], visits = [];
+    var stampId = function () { return 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 9); };
+    rows.forEach(function (r) {
+      var cur = byName[r.name.toLowerCase()], id;
+      if (!cur) {
+        id = stampId();
+        var add = { id: id, name: r.name, rank: r.rank, pioneer: r.pioneer, roles: r.roles, appointedWife: r.appointedWife, group: r.group, note: r.note };
+        fresh.push(add); byName[r.name.toLowerCase()] = add;
+      } else {
+        id = cur.id;
+        var up = { id: id }, changed = false;
+        // A plain "Publisher" in an older list never demotes someone already marked Elder or Servant here.
+        var keep = r.rank === 'Publisher' && (cur.rank === 'Elder' || cur.rank === 'Ministerial Servant');
+        if (r.rank !== cur.rank && !keep) { up.rank = r.rank; changed = true; }
+        if ((r.pioneer || '') !== (cur.pioneer || '')) { up.pioneer = r.pioneer; changed = true; }
+        if (r.roles.join('|') !== (cur.roles || []).join('|')) { up.roles = r.roles; changed = true; }
+        if (r.appointedWife && !cur.appointedWife) { up.appointedWife = true; changed = true; }
+        if (r.group && r.group !== cur.group) { up.group = r.group; changed = true; }
+        if (changed) updates.push(up);
+      }
+      if (r.lastVisit) {
+        var l = cur ? last(cur) : null;
+        if (!l || l.date < r.lastVisit) {
+          visits.push({ publisherId: id, publisherName: r.name, date: r.lastVisit, elders: [], elderIds: [],
+            notes: 'Recorded when the list was brought into Embrace (visit made before Embrace).', followUp: false, by: S.meId || '' });
+        }
+      }
+    });
+    return { type: 'import', rows: fresh, updates: updates, visits: visits, skipped: rows.length - fresh.length - updates.length };
   }
   function parseRoster(text) {
     var rows = parseCsv(text.replace(/^﻿/, ''));
@@ -725,9 +807,16 @@
       var name = (r[iName] || '').trim().replace(/\s+/g, ' ');
       if (!name) return;
       var get = function (n) { var i = col(n); return i >= 0 ? (r[i] || '').trim() : ''; };
-      var rank = normRank(get('rank'), get('status'));
-      if (/inactive/i.test(get('status')) && rank === 'Publisher') rank = 'Inactive';
-      out.push({ name: name, rank: rank, appointedWife: /^(y|yes|true|x|1)$/i.test(get('appointed_wife')), group: get('group'), note: get('note') });
+      var rank = normRank(get('rank'), get('status')), pioneer = normPioneer(get('pioneer'));
+      if (/Pioneer$/.test(rank)) { pioneer = pioneer || rank; rank = 'Publisher'; }
+      if (/inactive/i.test(get('status')) && rank === 'Publisher' && !pioneer) rank = 'Inactive';
+      var roles = get('roles').split(/[;|\/]/).map(function (x) { return x.trim(); }).filter(Boolean).map(function (x) {
+        for (var i = 0; i < ROLES.length; i++) if (ROLES[i].toLowerCase() === x.toLowerCase()) return ROLES[i];
+        return x;
+      });
+      var lv = get('last_visit');
+      out.push({ name: name, rank: rank, pioneer: pioneer, roles: roles, appointedWife: /^(y|yes|true|x|1)$/i.test(get('appointed_wife')),
+        group: get('group'), note: get('note'), lastVisit: /^\d{4}-\d{2}-\d{2}$/.test(lv) ? lv : '' });
     });
     return out;
   }
@@ -740,7 +829,8 @@
     if (st.status === 'ready' && !subscribed) {
       subscribed = true;
       store.subscribe(function (d) {
-        S.data = d; S.loaded = d.ready !== false; rebuild();
+        S.data = { publishers: d.publishers.map(norm), visits: d.visits, settings: d.settings };
+        S.loaded = d.ready !== false; rebuild();
         if (S.meId && S.loaded && !pub(S.meId)) { S.meId = null; lsSet('embrace-me', null); }
         render();
         if (S.sheet && (S.sheet.type === 'visit' || S.sheet.type === 'status')) renderSheet();

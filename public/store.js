@@ -21,6 +21,7 @@
       if (!mem) {
         mem = blank();
         (seed || []).forEach(function (p) { mem.publishers.push(Object.assign({ id: uid() }, p)); });
+        (window.EMBRACE_DEMO_VISITS || []).forEach(function (v) { mem.visits.push(Object.assign({ id: uid(), createdAt: 0 }, v)); });
         save();
       }
       return mem;
@@ -51,6 +52,17 @@
         return commit();
       },
       importRoster: function (rows) { var d = load(); rows.forEach(function (p) { d.publishers.push(Object.assign({ id: uid() }, p)); }); return commit(); },
+      updateMany: function (list) {
+        var d = load(), by = {};
+        list.forEach(function (u) { by[u.id] = u; });
+        d.publishers = d.publishers.map(function (p) { return by[p.id] ? Object.assign({}, p, by[p.id]) : p; });
+        return commit();
+      },
+      addVisits: function (list) {
+        var d = load();
+        list.forEach(function (v) { d.visits.push(Object.assign({ id: uid(), createdAt: Date.now() }, v)); });
+        return commit();
+      },
       saveSettings: function (s) { var d = load(); d.settings = Object.assign({}, d.settings, s); return commit(); },
       resetDemo: function () { try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ } mem = null; load(); return commit(); }
     };
@@ -80,6 +92,19 @@
       unsubs.push(m.fs.onSnapshot(ref('settings/app'), function (d) {
         data.settings = Object.assign({ overdueDays: 180 }, d.exists() ? d.data() : {}); emit();
       }));
+    }
+
+    // Firestore accepts up to 500 writes per batch; stay well under it.
+    function batched(items, add) {
+      var chunks = [];
+      for (var i = 0; i < items.length; i += 400) chunks.push(items.slice(i, i + 400));
+      return chunks.reduce(function (pr, chunk) {
+        return pr.then(function () {
+          var b = m.fs.writeBatch(db);
+          chunk.forEach(function (it) { add(b, it); });
+          return b.commit();
+        });
+      }, Promise.resolve());
     }
 
     // Is this phone unlocked? If not, has a congregation code been created yet?
@@ -144,15 +169,21 @@
         return b.commit();
       },
       importRoster: function (rows) {
-        var chunks = [];
-        for (var i = 0; i < rows.length; i += 400) chunks.push(rows.slice(i, i + 400));
-        return chunks.reduce(function (pr, chunk) {
-          return pr.then(function () {
-            var b = m.fs.writeBatch(db);
-            chunk.forEach(function (p) { b.set(m.fs.doc(col('publishers')), p); });
-            return b.commit();
-          });
-        }, Promise.resolve());
+        return batched(rows, function (b, p) {
+          var body = Object.assign({}, p); delete body.id;
+          b.set(p.id ? ref('publishers/' + p.id) : m.fs.doc(col('publishers')), body);
+        });
+      },
+      updateMany: function (list) {
+        return batched(list, function (b, u) {
+          var body = Object.assign({}, u); delete body.id;
+          b.set(ref('publishers/' + u.id), body, { merge: true });
+        });
+      },
+      addVisits: function (list) {
+        return batched(list, function (b, v) {
+          b.set(m.fs.doc(col('visits')), Object.assign({}, v, { createdAt: m.fs.serverTimestamp() }));
+        });
       },
       saveSettings: function (s) { return m.fs.setDoc(ref('settings/app'), s, { merge: true }); }
     };
