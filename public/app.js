@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '3.1';
+  var VERSION = '3.2';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -494,9 +494,9 @@
     return h;
   }
   function sheetImport(sh) {
-    var ups = sh.updates || [], vs = sh.visits || [];
-    var rows = [['New people', sh.rows.length], ['Privileges updated', ups.length], ['Earlier visits recorded', vs.length], ['Already up to date', sh.skipped]];
-    var any = sh.rows.length || ups.length || vs.length;
+    var ups = sh.updates || [], vs = sh.visits || [], rm = sh.removes || [];
+    var rows = [['New people', sh.rows.length], ['Privileges updated', ups.length], ['Earlier visits recorded', vs.length], ['Taken off the list', rm.length], ['Already up to date', sh.skipped]];
+    var any = sh.rows.length || ups.length || vs.length || rm.length;
     return head('Import', null, 'Close') + '<div class="glass list">' + rows.map(function (r) {
       return '<div class="row-plain"><span>' + r[0] + '</span><span>' + r[1] + '</span></div>';
     }).join('') + '</div>' +
@@ -649,13 +649,14 @@
     },
     'import-pick': function () { var f = document.getElementById('import-file'); if (f) f.click(); },
     'do-import': function () {
-      var rows = S.sheet.rows, ups = S.sheet.updates || [], vs = S.sheet.visits || [];
+      var rows = S.sheet.rows, ups = S.sheet.updates || [], vs = S.sheet.visits || [], rm = S.sheet.removes || [];
       store.importRoster(rows)
         .then(function () { return ups.length ? store.updateMany(ups) : null; })
         .then(function () { return vs.length ? store.addVisits(vs) : null; })
+        .then(function () { return rm.reduce(function (pr, id) { return pr.then(function () { return store.deletePublisher(id); }); }, Promise.resolve()); })
         .then(function () {
           closeSheet(); S.ringDrawn = false;
-          toast([rows.length ? rows.length + ' added' : '', ups.length ? ups.length + ' updated' : '', vs.length ? vs.length + ' visits' : ''].filter(Boolean).join(' · ') || 'Nothing changed');
+          toast([rows.length ? rows.length + ' added' : '', ups.length ? ups.length + ' updated' : '', vs.length ? vs.length + ' visits' : '', rm.length ? rm.length + ' removed' : ''].filter(Boolean).join(' · ') || 'Nothing changed');
         }, function (e) { toast(window.EmbraceStore.friendly(e)); });
     },
     switch: function () { S.meId = null; lsSet('embrace-me', null); S.pubId = null; render(); window.scrollTo(0, 0); },
@@ -768,10 +769,11 @@
   function planImport(rows) {
     var byName = {};
     S.data.publishers.forEach(function (p) { byName[p.name.toLowerCase()] = p; });
-    var fresh = [], updates = [], visits = [];
+    var fresh = [], updates = [], visits = [], removes = [];
     var stampId = function () { return 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 9); };
     rows.forEach(function (r) {
       var cur = byName[r.name.toLowerCase()], id;
+      if (r.remove) { if (cur && cur.id) removes.push(cur.id); return; }
       if (!cur) {
         id = stampId();
         var add = { id: id, name: r.name, rank: r.rank, pioneer: r.pioneer, roles: r.roles, appointedWife: r.appointedWife, group: r.group, note: r.note };
@@ -796,7 +798,8 @@
         }
       }
     });
-    return { type: 'import', rows: fresh, updates: updates, visits: visits, skipped: rows.length - fresh.length - updates.length };
+    var plain = rows.filter(function (r) { return !r.remove; }).length;
+    return { type: 'import', rows: fresh, updates: updates, visits: visits, removes: removes, skipped: plain - fresh.length - updates.length };
   }
   function parseRoster(text) {
     var rows = parseCsv(text.replace(/^﻿/, ''));
@@ -807,6 +810,7 @@
       var name = (r[iName] || '').trim().replace(/\s+/g, ' ');
       if (!name) return;
       var get = function (n) { var i = col(n); return i >= 0 ? (r[i] || '').trim() : ''; };
+      if (/^(delete|deceased|remove from embrace)$/i.test(get('status'))) { out.push({ name: name, remove: true, roles: [] }); return; }
       var rank = normRank(get('rank'), get('status')), pioneer = normPioneer(get('pioneer'));
       if (/Pioneer$/.test(rank)) { pioneer = pioneer || rank; rank = 'Publisher'; }
       if (/inactive/i.test(get('status')) && rank === 'Publisher' && !pioneer) rank = 'Inactive';
