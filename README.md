@@ -1,59 +1,41 @@
 # Embrace
 
-A shepherding visit tracker for the body of elders. Every elder signs in with his own Google account, logs visits with notes, and sees the whole flock sorted so whoever has waited longest is at the top. Regular pioneers, elders, ministerial servants and appointed wives are prioritized. Everything syncs live across iPhone and Android.
+A simple shepherding visit tracker for the body of elders. Tap **Log a Visit**, find the name, pick who went with you and the day, add notes, and save. Everyone is listed with whoever has waited longest at the top; regular pioneers, elders, ministerial servants and appointed wives come first. Every elder's phone updates within a second of a visit being saved.
 
-Embrace is an installable web app: elders open the link once, tap **Add to Home Screen**, and from then on it opens full-screen from its own icon like any other app. No App Store needed.
+Embrace is an installable web app for iPhone and Android: open the link once, tap **Add to Home Screen**, and it opens full-screen from its own sheep icon.
 
-## What's in here
+## How elders get in
+1. The first time Embrace opens on a phone, it asks for the **4-digit congregation code**.
+2. Then it asks **"Who are you?"** and lists everyone marked Elder. The brother taps his name, and the phone remembers him.
 
-| Path | What it is |
-| --- | --- |
-| `public/` | The app itself (HTML, CSS, JavaScript, icons). |
-| `public/firebase-config.js` | Where your Firebase settings go. While empty, the app runs in preview mode on one device. |
-| `firestore.rules` | Security rules: only elders on the list can read or write anything. |
-| `firebase.json` | Hosting settings. |
-| `.github/workflows/deploy.yml` | Publishes the app to Firebase Hosting every time `main` changes. |
+The code is never stored in this repository. The first phone to open the connected app creates it, and it lives only in the Firebase database, where no phone can read it back.
 
-**The publisher list is never stored in this repository.** You import it inside the app (Settings › Import a publisher list), and it lives only in your Firebase database, behind the elders-only rules.
+## Google (Firebase) setup — one time, about 10 minutes
+1. Go to <https://console.firebase.google.com>, sign in with your Google account, **Create a project** named `embrace-shepherding`. Google Analytics is not needed.
+2. **Build › Authentication › Get started › Sign-in method › Anonymous › Enable › Save.**
+3. **Build › Firestore Database › Create database** › choose the location nearest you › **Start in production mode**.
+4. **Firestore › Rules** tab › delete what's there › paste the contents of `firestore.rules` › **Publish**.
+5. **Project settings** (gear icon) › **Your apps** › **Web `</>`** › nickname `Embrace` › **Register app**. Copy the `firebaseConfig` block into `public/firebase-config.js` (or paste it to Claude).
 
-## One-time setup
+## Publishing from GitHub
+1. Firebase console › **Project settings › Service accounts › Generate new private key**. A `.json` file downloads.
+2. GitHub repo › **Settings › Secrets and variables › Actions › New repository secret**. Name: `FIREBASE_SERVICE_ACCOUNT`. Value: the whole contents of that file. Then delete the file.
+3. If your project ID is not exactly `embrace-shepherding`, change it in `.firebaserc` and `.github/workflows/deploy.yml`.
+4. Every push to `main` publishes the app to `https://<project-id>.web.app`.
 
-### 1. Create the Firebase project (Google)
-1. Go to <https://console.firebase.google.com> and sign in with the Google account that will own Embrace.
-2. **Add project** › name it `embrace-shepherding`. Google Analytics is not needed. Note the **project ID** it shows (it may add numbers at the end).
-3. **Build › Authentication › Get started › Google** › Enable › Save.
-4. **Build › Firestore Database › Create database** › pick the location closest to you › **Start in production mode**.
-5. **Firestore › Rules** tab › replace everything with the contents of `firestore.rules` › **Publish**.
-6. **Project settings (gear) › Your apps › Web (`</>`)** › nickname `Embrace` › Register. Copy the `firebaseConfig` block into `public/firebase-config.js`.
+## First run
+1. Open the app link, create the 4-digit code, and on "Who are you?" tap **My name is not here** and find your name (or type it).
+2. **Settings › Import a list (CSV)** and pick the roster file.
+3. Open each elder, ministerial servant, regular pioneer and appointed wife, tap **Edit**, and set their privilege.
+4. Send the link and the code to the other elders.
 
-### 2. Add yourself as the first admin
-In **Firestore › Data**: **Start collection** › Collection ID `elders` › Document ID = your Gmail address in lowercase › add two fields:
-- `name` (string): your name
-- `admin` (boolean): `true`
-
-After that, add the other elders from inside the app (Settings › Add an elder).
-
-### 3. Automatic publishing from GitHub
-1. Firebase console › **Project settings › Service accounts › Generate new private key**. A `.json` file downloads. Keep it private.
-2. GitHub repo › **Settings › Secrets and variables › Actions › New repository secret** › Name `FIREBASE_SERVICE_ACCOUNT` › paste the entire contents of that file › Save. Then delete the file from your computer.
-3. If your project ID is not exactly `embrace-shepherding`, change it in `.firebaserc` and in `.github/workflows/deploy.yml`.
-4. Push to `main` (or run the **Deploy Embrace** workflow from the Actions tab). The app goes live at `https://<project-id>.web.app`.
-
-### 4. Load the congregation
-Open the app, sign in, go to **Settings › Import a publisher list (CSV)** and pick the roster file. Columns: `group, meeting_place, name, status, rank, appointed_wife, note`. Only `name` is required. `rank` is one of Elder, Ministerial Servant, Regular Pioneer, Auxiliary Pioneer, Publisher, Inactive, Removed. `appointed_wife` is `yes` or blank.
-
-### 5. Hand it to the elders
-Send each elder the link. On iPhone: open it in **Safari** › Share › **Add to Home Screen**. On Android: open it in **Chrome** › ⋮ menu › **Add to Home screen** (or **Install app**). They sign in with the Gmail address you added for them.
-
-## How it decides who's next
-- **Priority** = elders, ministerial servants, regular pioneers and appointed wives who are active.
-- Inside each section: never visited first, then whoever has waited the longest.
-- A publisher turns orange after the "Overdue after" period in Settings (default 6 months).
-- "Needs follow-up" on a visit puts that publisher on the Activity tab until the next visit.
-- The Activity tab counts visits by each elder for the current service year (September–August).
+## How the order works
+- **Who's next** shows pioneers and appointed first, then publishers, then inactive and removed ones.
+- Within each section: never visited first, then whoever has waited the longest. Saving a visit moves that person down.
+- Names turn orange after the **Overdue after** period in Settings (default 6 months).
+- **Needs a follow-up** on a visit lists that person on the Visits tab until the next visit.
 
 ## Privacy
-- Only Google accounts listed in `elders` can read or write any data; this is enforced by the database itself, not just the app.
-- An elder can delete visits he logged. Admins can delete any visit, remove publishers and manage the elders list.
-- Visit notes never leave the database except to the phones of elders on the list.
-- Removing an elder from the list cuts off his access immediately.
+- Nothing can be read until a phone enters the congregation code; the database enforces this, not just the app.
+- The publisher list and notes never go into this repository. Keep CSV files out of it (`.gitignore` already blocks them).
+- To lock out new phones, change the code in Settings.

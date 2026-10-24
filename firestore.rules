@@ -1,53 +1,55 @@
 rules_version = '2';
 
 // Embrace security rules.
-// Nobody can read or write anything unless their Google account's email
-// is listed in the "elders" collection. There is no public sign-up.
+// Each phone signs in silently (anonymous Firebase account). Nothing can be read or
+// written until that phone has been unlocked with the congregation code.
+// The code itself is never readable by any phone; these rules compare it on the server.
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function email() {
-      return request.auth.token.email.lower();
+    function signedIn() { return request.auth != null; }
+    function unlocked() {
+      return signedIn() && exists(/databases/$(database)/documents/devices/$(request.auth.uid));
     }
-    function isElder() {
-      return request.auth != null
-        && request.auth.token.email_verified == true
-        && exists(/databases/$(database)/documents/elders/$(email()));
-    }
-    function isAdmin() {
-      return isElder()
-        && get(/databases/$(database)/documents/elders/$(email())).data.admin == true;
-    }
+    function accessDoc() { return /databases/$(database)/documents/config/access; }
 
-    // The elders list doubles as the sign-in allowlist.
-    match /elders/{elderEmail} {
-      allow get: if request.auth != null && elderEmail == email();  // lets the app check "am I on the list?"
-      allow read: if isElder();
-      allow write: if isAdmin();
+    // The congregation code. Created once by the first phone, changeable by unlocked phones, never readable.
+    match /config/access {
+      allow read: if false;
+      allow create: if signedIn() && !exists(accessDoc()) && request.resource.data.code.matches('^[0-9]{4}$');
+      allow update: if unlocked() && request.resource.data.code.matches('^[0-9]{4}$');
+      allow delete: if false;
+    }
+    // Tells a new phone whether to ask "create a code" or "enter the code". Holds no secret.
+    match /config/public {
+      allow read: if signedIn();
+      allow create: if signedIn() && !exists(/databases/$(database)/documents/config/public)
+        && getAfter(accessDoc()).data.code is string;
+      allow update, delete: if false;
+    }
+    // One record per unlocked phone. Created only when the phone supplies the right code.
+    match /devices/{deviceId} {
+      allow get: if signedIn() && request.auth.uid == deviceId;
+      allow create: if signedIn() && request.auth.uid == deviceId
+        && request.resource.data.code == getAfter(accessDoc()).data.code;
+      allow update, delete: if false;
     }
 
     match /publishers/{id} {
-      allow read: if isElder();
-      allow create, update: if isElder()
+      allow read, delete: if unlocked();
+      allow create, update: if unlocked()
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0
         && request.resource.data.name.size() < 120;
-      allow delete: if isAdmin();
     }
-
     match /visits/{id} {
-      allow read: if isElder();
-      allow create: if isElder()
-        && request.resource.data.createdBy == email()
-        && request.resource.data.date is string
-        && request.resource.data.notes.size() < 20000;
-      // An elder can delete a visit he logged; admins can delete any.
-      allow update, delete: if isElder() && (resource.data.createdBy == email() || isAdmin());
+      allow read, delete: if unlocked();
+      allow create: if unlocked() && request.resource.data.date is string
+        && request.resource.data.notes is string && request.resource.data.notes.size() < 20000;
+      allow update: if unlocked();
     }
-
     match /settings/{doc} {
-      allow read: if isElder();
-      allow write: if isAdmin();
+      allow read, write: if unlocked();
     }
 
     match /{document=**} {
