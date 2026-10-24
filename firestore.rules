@@ -1,0 +1,57 @@
+rules_version = '2';
+
+// Embrace security rules.
+// Nobody can read or write anything unless their Google account's email
+// is listed in the "elders" collection. There is no public sign-up.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function email() {
+      return request.auth.token.email.lower();
+    }
+    function isElder() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && exists(/databases/$(database)/documents/elders/$(email()));
+    }
+    function isAdmin() {
+      return isElder()
+        && get(/databases/$(database)/documents/elders/$(email())).data.admin == true;
+    }
+
+    // The elders list doubles as the sign-in allowlist.
+    match /elders/{elderEmail} {
+      allow get: if request.auth != null && elderEmail == email();  // lets the app check "am I on the list?"
+      allow read: if isElder();
+      allow write: if isAdmin();
+    }
+
+    match /publishers/{id} {
+      allow read: if isElder();
+      allow create, update: if isElder()
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() < 120;
+      allow delete: if isAdmin();
+    }
+
+    match /visits/{id} {
+      allow read: if isElder();
+      allow create: if isElder()
+        && request.resource.data.createdBy == email()
+        && request.resource.data.date is string
+        && request.resource.data.notes.size() < 20000;
+      // An elder can delete a visit he logged; admins can delete any.
+      allow update, delete: if isElder() && (resource.data.createdBy == email() || isAdmin());
+    }
+
+    match /settings/{doc} {
+      allow read: if isElder();
+      allow write: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

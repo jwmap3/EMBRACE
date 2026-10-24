@@ -1,0 +1,9 @@
+# Never commit congregation data or keys
+*.csv
+roster*
+*-service-account*.json
+service-account*.json
+preview/
+.firebase/
+node_modules/
+.DS_Store
