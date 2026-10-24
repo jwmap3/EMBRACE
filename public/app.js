@@ -364,7 +364,8 @@
         '<input id="gate-code" class="pin-input" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" aria-label="Congregation code">' +
         '<p class="err" id="gate-err" role="alert" hidden></p></div>';
     }
-    var els = elders(), h = '<div class="welcome">' + sheep(110, 'bob') + '<h1>Who are you?</h1>';
+    // Only elders who have not yet picked their name on any phone are offered.
+    var els = elders().filter(function (p) { return !p.claimed; }), h = '<div class="welcome">' + sheep(110, 'bob') + '<h1>Who are you?</h1>';
     if (!S.whoAll && els.length) {
       return h + '<p>Tap your name. Embrace will remember you on this phone.</p>' +
         '<div class="glass list">' + els.map(function (p) { return cell(p, 'iam', true); }).join('') + '</div>' +
@@ -662,13 +663,12 @@
       var id = el.dataset.id, p = pub(id);
       el.classList.add('picked');
       var go = function () { setMe(id); render(); window.scrollTo(0, 0); toast('Welcome, ' + firstName(p.name)); };
-      if (p && p.rank !== 'Elder') store.savePublisher({ id: id, rank: 'Elder' }).then(function () { setTimeout(go, 450); });
-      else setTimeout(go, 450);
+      store.savePublisher({ id: id, rank: 'Elder', claimed: true, claimedOn: todayStr() }).then(function () { setTimeout(go, 450); }, function () { setTimeout(go, 450); });
     },
     'iam-new': function () {
       var n = S.whoQuery.trim().replace(/\s+/g, ' ');
       if (n.length < 2) return;
-      store.savePublisher({ name: n, rank: 'Elder', group: '', appointedWife: false, note: '' }).then(function (id) { setMe(id); render(); toast('Welcome, ' + firstName(n)); });
+      store.savePublisher({ name: n, rank: 'Elder', group: '', appointedWife: false, note: '', claimed: true, claimedOn: todayStr() }).then(function (id) { setMe(id); render(); toast('Welcome, ' + firstName(n)); });
     },
     'who-all': function () { S.whoAll = true; render(); focusLater('who-search'); },
     'who-elders': function () { S.whoAll = false; render(); },
