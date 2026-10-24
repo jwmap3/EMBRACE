@@ -202,7 +202,7 @@
 
   /* ---------------- main views ---------------- */
   function viewHome() {
-    var m = me(), cong = (S.data.settings && S.data.settings.congregationName) || '';
+    var m = me(), cong = (S.data.settings && S.data.settings.congregationName) || 'Northwood Congregation';
     var all = flock(), counts = { fresh: 0, soon: 0, late: 0, none: 0 };
     all.forEach(function (p) { counts[state(p)]++; });
     var seen = counts.fresh + counts.soon;
@@ -213,8 +213,13 @@
 
     var h = '<div class="screen">' +
       '<div class="top rise"><span class="hello">' + greeting() + (m ? ', ' + esc(firstName(m.name)) : '') + '</span><h1 class="brand">Embrace</h1>' + (cong ? '<span class="sub">' + esc(cong) + '</span>' : '') + '</div>';
-    if (!all.length) {
-      return h + empty('Your pasture is empty', 'Add the publisher list in Settings to begin.', '<button class="quiet" data-action="tab" data-tab="settings">Open Settings</button>') + '</div>';
+    // Until the congregation's list is in, the first thing on Home is the button to bring it in.
+    if (S.data.publishers.length < 10) {
+      h += '<div class="glass empty rise">' + sheep(70, 'bob') + '<b>Bring in your publishers</b>' +
+        '<span>Tap below and choose the roster file (embrace-roster.csv). Everyone will appear here at once.</span>' +
+        '<button class="cta" data-action="import-pick" style="margin-top:8px">Import publisher list</button>' +
+        '<input id="import-file" type="file" accept=".csv,text/csv,text/plain,text/comma-separated-values,*/*" hidden></div>';
+      if (!all.length) return h + '</div>';
     }
     h += '<div class="ring-wrap rise"><div class="ring-float"><div class="ring-glow"></div>' + ringSvg(counts, all.length) +
       '<div class="ring-center"><b>' + seen + '</b><span>of ' + all.length + ' visited in the last ' + odText() + '</span></div></div></div>' +
@@ -293,7 +298,7 @@
   }
 
   function viewSettings() {
-    var m = me(), cong = (S.data.settings && S.data.settings.congregationName) || '', els = elders();
+    var m = me(), cong = (S.data.settings && S.data.settings.congregationName) || 'Northwood Congregation', els = elders();
     var h = '<div class="screen"><div class="top"><h1 class="title">Settings</h1></div>' +
       '<div class="glass list">' +
       (m ? '<div class="cell"><span class="av" aria-hidden="true">' + esc(initials(m.name)) + '</span><span class="txt"><b>' + esc(m.name) + '</b><small>Using Embrace on this phone</small></span></div>' : '') +
