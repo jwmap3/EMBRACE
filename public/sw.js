@@ -1,7 +1,7 @@
 // Keeps Embrace opening quickly and working with weak signal.
 // The app files are cached; visit data syncs through Firebase's own offline cache.
-var CACHE = 'embrace-v6';
-var FILES = ['./', 'index.html', 'styles.css', 'store.js', 'app.js', 'firebase-config.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png'];
+var CACHE = 'embrace-v7';
+var FILES = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png'];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(FILES); }).then(function () { return self.skipWaiting(); }));
@@ -15,7 +15,8 @@ self.addEventListener('activate', function (e) {
 self.addEventListener('fetch', function (e) {
   var url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.indexOf('/__/') === 0) return;
-  e.respondWith(fetch(e.request).then(function (res) {
+  // Always check GitHub for a newer copy first (no stale browser cache), fall back to the saved copy offline.
+  e.respondWith(fetch(e.request, { cache: 'no-cache' }).then(function (res) {
     var copy = res.clone();
     caches.open(CACHE).then(function (c) { c.put(e.request, copy); });
     return res;
