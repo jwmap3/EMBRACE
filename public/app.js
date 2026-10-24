@@ -2,17 +2,24 @@
 (function () {
   'use strict';
 
-  var VERSION = '2.0';
+  var VERSION = '3.0';
   var RANKS = ['Elder', 'Ministerial Servant', 'Regular Pioneer', 'Auxiliary Pioneer', 'Publisher', 'Inactive', 'Removed'];
+  var STATUS = {
+    fresh: { label: 'Visited', long: 'Visited recently', color: 'var(--st-fresh)' },
+    soon: { label: 'Due soon', long: 'Due for a visit soon', color: 'var(--st-soon)' },
+    late: { label: 'Overdue', long: 'Overdue for a visit', color: 'var(--st-late)' },
+    none: { label: 'Not yet', long: 'Not visited yet', color: 'var(--st-none)' }
+  };
+  var ORDER = ['fresh', 'soon', 'late', 'none'];
   var PREVIEW = !!window.EMBRACE_PREVIEW;
   var store = window.EmbraceStore.create();
 
   var S = {
     status: 'loading', error: '', loaded: false,
     data: { publishers: [], visits: [], settings: { overdueDays: 180 } },
-    tab: 'flock', mode: 'priority', group: 'all', query: '',
-    pubId: null, sheet: null, hop: null, flockScroll: 0,
-    meId: null, whoAll: false, whoQuery: '', busy: false
+    tab: 'home', mode: 'priority', group: 'all', query: '',
+    pubId: null, sheet: null, hop: null, scroll: {},
+    meId: null, whoAll: false, whoQuery: '', busy: false, ringDrawn: false
   };
   var idx = { byPub: {}, groups: [] };
 
@@ -29,8 +36,7 @@
     });
   }
   function pad(n) { return n < 10 ? '0' + n : '' + n; }
-  function ymd(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
-  function todayStr() { return ymd(new Date()); }
+  function todayStr() { var d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
   function parseDay(s) { var p = String(s).split('-'); return new Date(+p[0], +p[1] - 1, +p[2]); }
   function daysSince(s) { return Math.round((parseDay(todayStr()) - parseDay(s)) / 86400000); }
   var MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -61,6 +67,7 @@
   function stamp(t) { return !t ? 0 : typeof t === 'number' ? t : t.toMillis ? t.toMillis() : 0; }
   function visitOrder(a, b) { return a.date !== b.date ? (a.date < b.date ? 1 : -1) : stamp(b.createdAt) - stamp(a.createdAt); }
   function who(v) { return (v.elders || []).join(' & ') || '—'; }
+  function greeting() { var h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; }
 
   function rebuild() {
     var byPub = {}, groups = {};
@@ -70,6 +77,7 @@
   }
   function last(p) { var l = idx.byPub[p.id]; return l ? l[0] : null; }
   function waiting(p) { var l = last(p); return l ? daysSince(l.date) : null; }
+  function state(p) { var w = waiting(p); return w === null ? 'none' : w > od() ? 'late' : w > od() - 30 ? 'soon' : 'fresh'; }
   // Never visited first, then whoever has waited longest. A fresh visit sinks a person down the list.
   function byNeed(a, b) {
     var wa = waiting(a), wb = waiting(b);
@@ -84,17 +92,34 @@
       return pa - pb || byNeed(a, b);
     });
   }
+  function flock() { return S.data.publishers.filter(function (p) { return p.rank !== 'Removed'; }); }
 
   /* ---------------- art ---------------- */
-  function sheep(size, extra) {
-    return '<svg class="sheep ' + (extra || '') + '" width="' + size + '" height="' + Math.round(size * 0.8) + '" viewBox="0 0 30 24" aria-hidden="true">' +
+  function sheep(size, extra, flip) {
+    return '<svg class="sheep ' + (extra || '') + '" width="' + size + '" height="' + Math.round(size * 0.8) + '" viewBox="0 0 30 24" aria-hidden="true"' + (flip ? ' style="transform:scaleX(-1)"' : '') + '>' +
       '<path class="leg" d="M11 18.5v4.2M20 18.5v4.2"/>' +
       '<path class="wool" d="M8.6 9.2a4.6 4.6 0 0 1 7.6-2.6 4.6 4.6 0 0 1 7.4 1.2 4.2 4.2 0 0 1 2.6 6.6 4.2 4.2 0 0 1-4.6 4.2H11.4a4.2 4.2 0 0 1-4-3.6 3.8 3.8 0 0 1 1.2-5.8z"/>' +
-      '<ellipse class="face" cx="5.6" cy="11.6" rx="3.6" ry="2.9"/><circle class="eye" cx="4.5" cy="11" r=".6"/></svg>';
+      '<ellipse class="ear" cx="7.6" cy="9.4" rx="1.6" ry=".8" transform="rotate(-30 7.6 9.4)"/>' +
+      '<ellipse class="face" cx="5.6" cy="11.8" rx="3.4" ry="2.8"/><circle class="eye" cx="4.5" cy="11.2" r=".6"/></svg>';
+  }
+  function scene() {
+    var stars = '';
+    var pts = [[8, 6], [18, 14], [27, 4], [36, 11], [47, 7], [58, 16], [66, 5], [74, 12], [83, 8], [91, 15], [13, 22], [52, 25], [70, 24], [95, 4], [40, 19], [30, 27]];
+    pts.forEach(function (p, i) { stars += '<circle cx="' + p[0] + '%" cy="' + p[1] + '%" r="' + (i % 3 === 0 ? 1.4 : 0.9) + '"/>'; });
+    var cloud = function (c) {
+      return '<svg class="cloud ' + c + '" viewBox="0 0 220 70" aria-hidden="true"><ellipse cx="70" cy="44" rx="58" ry="22"/><ellipse cx="120" cy="34" rx="50" ry="28"/><ellipse cx="165" cy="46" rx="44" ry="18"/></svg>';
+    };
+    return '<div class="scene" aria-hidden="true"><svg class="stars" width="100%" height="100%">' + stars + '</svg><div class="moon"></div>' +
+      cloud('c1') + cloud('c2') + cloud('c3') +
+      '<svg class="hills" viewBox="0 0 400 240" preserveAspectRatio="none">' +
+      '<path class="far" d="M0 120 C 70 80, 150 92, 220 108 S 340 84, 400 100 L 400 240 L 0 240 Z"/>' +
+      '<path class="mid" d="M0 158 C 90 120, 170 132, 250 150 S 360 128, 400 140 L 400 240 L 0 240 Z"/>' +
+      '<path class="near" d="M0 196 C 110 168, 210 178, 290 192 S 370 180, 400 186 L 400 240 L 0 240 Z"/></svg>' +
+      '<div class="grazer"><div class="walker">' + sheep(34) + '</div><div class="walker w2">' + sheep(34, '', true) + '</div><div class="walker w3">' + sheep(40) + '</div></div></div>';
   }
   var I = {
-    flock: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 8.5a2.6 2.6 0 0 1 4.2-1.2 2.6 2.6 0 0 1 4.3.6 2.6 2.6 0 0 1 1.7 4.4 2.6 2.6 0 0 1-2.6 3.2H9.2A2.6 2.6 0 0 1 7 12.6"/><ellipse cx="5.4" cy="10.6" rx="2.4" ry="2"/><path d="M9.5 15.5v3.5M15.5 15.5v3.5"/></svg>',
-    visits: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21V8a4 4 0 0 1 8 0v1.5"/><path d="M17 9.5a1.4 1.4 0 0 1-2.8 0"/></svg>',
+    home: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 8.5a2.6 2.6 0 0 1 4.2-1.2 2.6 2.6 0 0 1 4.3.6 2.6 2.6 0 0 1 1.7 4.4 2.6 2.6 0 0 1-2.6 3.2H9.2A2.6 2.6 0 0 1 7 12.6"/><ellipse cx="5.4" cy="10.6" rx="2.4" ry="2"/><path d="M9.5 15.5v3.5M15.5 15.5v3.5"/></svg>',
+    flock: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21V8a4 4 0 0 1 8 0v1.5"/><path d="M17 9.5a1.4 1.4 0 0 1-2.8 0"/></svg>',
     settings: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>',
     search: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>',
     back: '<svg width="12" height="20" viewBox="0 0 11 18" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2L2 9l7 7"/></svg>',
@@ -105,60 +130,126 @@
   };
 
   /* ---------------- pieces ---------------- */
-  function subline(p, opts) {
+  function subline(p) {
     var bits = [];
     if (p.rank && p.rank !== 'Publisher') bits.push(p.rank);
     if (p.appointedWife) bits.push('Appointed wife');
-    if (opts && opts.group && p.group) bits.push(p.group + ' group');
     var l = last(p); if (l && l.followUp) bits.push('Follow up');
     return bits.join(' · ');
   }
   function endHtml(p) {
-    var w = waiting(p);
-    if (w === null) return '<span class="end over">Never' + I.chev + '</span>';
-    if (w <= 0) return '<span class="end">Today' + I.chev + '</span>';
-    return '<span class="end' + (w > od() ? ' over' : '') + '">' + w + (w === 1 ? ' day' : ' days') + I.chev + '</span>';
+    var w = waiting(p), st = state(p);
+    var dot = '<i class="dot" style="background:' + STATUS[st].color + '"></i>';
+    var t = w === null ? 'Never' : w <= 0 ? 'Today' : w + (w === 1 ? ' day' : ' days');
+    return '<span class="end' + (st === 'late' || st === 'none' ? ' late' : '') + '">' + dot + t + I.chev + '</span>';
   }
-  function cell(p, action) {
+  function cell(p, action, plain) {
     var sub = subline(p);
     return '<button class="cell" data-action="' + (action || 'open') + '" data-id="' + esc(p.id) + '">' +
       '<span class="av" aria-hidden="true">' + esc(initials(p.name)) + '</span>' +
       '<span class="txt"><b>' + esc(p.name) + '</b>' + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</span>' +
-      (action === 'iam' ? '' : endHtml(p)) + '</button>';
+      (plain ? '' : endHtml(p)) + '</button>';
   }
-  function block(title, list, action) {
+  function block(title, list) {
     if (!list.length) return '';
-    return '<h2 class="label">' + esc(title) + '</h2><div class="group">' + list.map(function (p) { return cell(p, action); }).join('') + '</div>';
+    return '<h2 class="label">' + esc(title) + '</h2><div class="glass list">' + list.map(function (p) { return cell(p); }).join('') + '</div>';
   }
   function empty(title, text, btn) {
-    return '<div class="group empty">' + sheep(64, 'bob') + '<b>' + esc(title) + '</b><span>' + esc(text) + '</span>' + (btn || '') + '</div>';
+    return '<div class="glass empty">' + sheep(70, 'bob') + '<b>' + esc(title) + '</b><span>' + esc(text) + '</span>' + (btn || '') + '</div>';
   }
-  function centeredHead(title, sub) {
-    return '<header style="display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center">' + sheep(46, 'bob') +
-      '<h1 class="title">' + esc(title) + '</h1>' + (sub ? '<p class="sub" style="margin:0">' + esc(sub) + '</p>' : '') + '</header>';
+  function noteRow(v, showName) {
+    var p = pub(v.publisherId);
+    return '<button class="note" data-action="visit" data-id="' + esc(v.id) + '"><span class="top2"><b>' +
+      esc(showName ? (p ? p.name : v.publisherName) : fmtDate(v.date)) + '</b><span>' + (showName ? esc(fmtDate(v.date, true)) : (v.followUp ? '<span class="flag">Follow up</span>' : '')) + '</span></span>' +
+      '<span class="who">' + esc(who(v)) + '</span>' + (!showName && v.notes ? '<p>' + esc(v.notes) + '</p>' : '') + '</button>';
+  }
+
+  /* The floating flock ring: one segment per status, drawn in on first view. */
+  function ringSvg(counts, total) {
+    var r = 108, sw = 24, gap = total > 0 ? 3.6 : 0;
+    var nonzero = ORDER.filter(function (k) { return counts[k] > 0; });
+    var h = '<svg class="ring" viewBox="0 0 260 260" role="img" aria-label="' + ORDER.map(function (k) { return counts[k] + ' ' + STATUS[k].label; }).join(', ') + '">' +
+      '<circle class="track" cx="130" cy="130" r="' + r + '" stroke-width="' + sw + '"/>';
+    if (!total) return h + '</svg>';
+    var start = 0;
+    ORDER.forEach(function (k) {
+      if (!counts[k]) return;
+      var share = counts[k] / total * 100;
+      var len = nonzero.length === 1 ? 100 : Math.max(0.01, share - gap);
+      var cap = nonzero.length === 1 ? 'butt' : 'round';
+      var final = len + ' ' + (100 - len);
+      h += '<circle class="seg" cx="130" cy="130" r="' + r + '" pathLength="100" stroke-width="' + sw + '" stroke="' + STATUS[k].color + '"' +
+        ' stroke-linecap="' + cap + '" stroke-dashoffset="' + (-(start + (nonzero.length === 1 ? 0 : gap / 2))) + '"' +
+        ' data-final="' + final + '" stroke-dasharray="' + (S.ringDrawn ? final : '0 100') + '"/>';
+      start += share;
+    });
+    return h + '</svg>';
+  }
+  function drawRing() {
+    if (S.ringDrawn) return;
+    var segs = document.querySelectorAll('.ring .seg');
+    if (!segs.length) return;
+    S.ringDrawn = true;
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        Array.prototype.forEach.call(segs, function (s, i) {
+          s.style.transitionDelay = (0.15 + i * 0.18) + 's';
+          s.setAttribute('stroke-dasharray', s.getAttribute('data-final'));
+        });
+      });
+    });
   }
 
   /* ---------------- main views ---------------- */
+  function viewHome() {
+    var m = me(), cong = (S.data.settings && S.data.settings.congregationName) || '';
+    var all = flock(), counts = { fresh: 0, soon: 0, late: 0, none: 0 };
+    all.forEach(function (p) { counts[state(p)]++; });
+    var seen = counts.fresh + counts.soon;
+    var pri = all.filter(isPriority), priDone = pri.filter(function (p) { var s = state(p); return s === 'fresh' || s === 'soon'; }).length;
+    var next = needOrder(all.filter(function (p) { return state(p) !== 'fresh'; })).slice(0, 3);
+    var follow = S.data.publishers.filter(function (p) { var l = last(p); return l && l.followUp; }).sort(byNeed);
+    var recent = S.data.visits.slice().sort(visitOrder).slice(0, 3);
+
+    var h = '<div class="screen">' +
+      '<div class="top rise"><span class="hello">' + greeting() + (m ? ', ' + esc(firstName(m.name)) : '') + '</span><h1 class="brand">Embrace</h1>' + (cong ? '<span class="sub">' + esc(cong) + '</span>' : '') + '</div>';
+    if (!all.length) {
+      return h + empty('Your pasture is empty', 'Add the publisher list in Settings to begin.', '<button class="quiet" data-action="tab" data-tab="settings">Open Settings</button>') + '</div>';
+    }
+    h += '<div class="ring-wrap rise"><div class="ring-float"><div class="ring-glow"></div>' + ringSvg(counts, all.length) +
+      '<div class="ring-center"><b>' + seen + '</b><span>of ' + all.length + ' visited in the last ' + odText() + '</span></div></div></div>' +
+      '<div class="legend rise">' + ORDER.map(function (k) {
+        return '<button class="key glass" data-action="status" data-st="' + k + '"><i style="background:' + STATUS[k].color + '"></i><span>' + STATUS[k].label + '</span><b>' + counts[k] + '</b></button>';
+      }).join('') + '</div>' +
+      '<button class="cta rise" data-action="log-start">' + I.plus + 'Log a Visit</button>' +
+      '<button class="pill-search glass rise" data-action="find">' + I.search + 'Find someone</button>';
+    if (pri.length) {
+      h += '<div class="glass pri"><div class="row"><b>Pioneers &amp; appointed</b><span>' + priDone + ' of ' + pri.length + '</span></div>' +
+        '<div class="bar"><i style="width:' + Math.round(priDone / pri.length * 100) + '%"></i></div></div>';
+    }
+    if (follow.length) {
+      h += '<div class="glass list"><div class="card-head"><h2>Needs a follow-up</h2></div>' + follow.slice(0, 5).map(function (p) { return cell(p); }).join('') + '</div>';
+    }
+    if (next.length) {
+      h += '<div class="glass list"><div class="card-head"><h2>Next to visit</h2><button data-action="tab" data-tab="flock">See all</button></div>' +
+        next.map(function (p) { return cell(p); }).join('') + '</div>';
+    }
+    h += '<div class="glass list"><div class="card-head"><h2>Recent visits</h2>' + (recent.length ? '<button data-action="all-visits">See all</button>' : '') + '</div>' +
+      (recent.length ? recent.map(function (v) { return noteRow(v, true); }).join('') : '<div class="empty" style="padding:8px 18px 22px"><span>No visits yet. Tap Log a Visit to add the first one.</span></div>') + '</div>';
+    return h + '</div>';
+  }
+
   function flockList() {
     var all = S.data.publishers;
-    if (!all.length) return empty('No publishers yet', 'Add your publisher list in Settings.', '<button class="quiet-btn" data-action="tab" data-tab="settings">Open Settings</button>');
+    if (!all.length) return empty('No publishers yet', 'Add your publisher list in Settings.');
     var q = S.query.trim().toLowerCase();
-    var list = all.filter(function (p) {
-      return (S.group === 'all' || (p.group || '') === S.group) && (!q || p.name.toLowerCase().indexOf(q) >= 0);
-    });
+    var list = all.filter(function (p) { return (S.group === 'all' || (p.group || '') === S.group) && (!q || p.name.toLowerCase().indexOf(q) >= 0); });
     if (!list.length) return empty('No one found', q ? 'No name matches "' + S.query.trim() + '".' : 'No one in this group yet.');
-    if (q) return '<div class="group">' + needOrder(list).map(function (p) { return cell(p); }).join('') + '</div>';
-
+    if (q) return '<div class="glass list">' + needOrder(list).map(function (p) { return cell(p); }).join('') + '</div>';
     var h = '';
     if (S.mode === 'priority') {
-      var pri = list.filter(isPriority).sort(byNeed);
-      var rest = list.filter(function (p) { return isActive(p) && !isPriority(p); }).sort(byNeed);
-      var cur = function (p) { var w = waiting(p); return w !== null && w <= od(); };
-      h += pri.length
-        ? '<p class="summary">' + pri.filter(cur).length + ' of ' + pri.length + ' pioneers and appointed visited in the last ' + odText() + '.</p>'
-        : '<p class="summary">Tip: open a person and tap Edit to mark elders, servants, pioneers and appointed wives. They will rise to the top.</p>';
-      h += block('Pioneers & appointed', pri);
-      h += block('Publishers', rest);
+      h += block('Pioneers & appointed', list.filter(isPriority).sort(byNeed));
+      h += block('Publishers', list.filter(function (p) { return isActive(p) && !isPriority(p); }).sort(byNeed));
       h += block('Inactive', list.filter(function (p) { return p.rank === 'Inactive'; }).sort(byNeed));
       h += block('Removed', list.filter(function (p) { return p.rank === 'Removed'; }).sort(byNeed));
     } else {
@@ -169,127 +260,108 @@
     }
     return h;
   }
-
   function viewFlock() {
-    var cong = (S.data.settings && S.data.settings.congregationName) || '';
     var opts = '<option value="all">All groups</option>' + idx.groups.map(function (g) {
       return '<option value="' + esc(g) + '"' + (S.group === g ? ' selected' : '') + '>' + esc(g) + '</option>';
     }).join('');
-    return '<div class="screen">' +
-      centeredHead('Embrace', cong || 'Shepherding visits') +
-      '<button class="big-btn" data-action="log-start" style="display:flex;align-items:center;justify-content:center;gap:8px">' + I.plus + 'Log a Visit</button>' +
-      '<label class="search">' + I.search + '<span class="sr">Find a name</span><input id="search" type="search" autocomplete="off" placeholder="Find a name" value="' + esc(S.query) + '"></label>' +
-      '<div class="filters"><div class="seg" role="group" aria-label="Sort">' +
+    return '<div class="screen"><div class="top"><h1 class="title">The Flock</h1><span class="sub">' + S.data.publishers.length + ' people · longest wait first</span></div>' +
+      '<label class="search glass">' + I.search + '<span class="sr">Find a name</span><input id="search" type="search" autocomplete="off" placeholder="Find a name" value="' + esc(S.query) + '"></label>' +
+      '<div class="filters"><div class="seg glass" role="group" aria-label="Sort">' +
       '<button data-action="mode" data-mode="priority" aria-pressed="' + (S.mode === 'priority') + '">Who\'s next</button>' +
       '<button data-action="mode" data-mode="everyone" aria-pressed="' + (S.mode === 'everyone') + '">By group</button></div>' +
-      (idx.groups.length ? '<select class="pick" id="group-pick" aria-label="Field service group">' + opts + '</select>' : '') + '</div>' +
-      '<div id="results" style="display:flex;flex-direction:column;gap:16px">' + flockList() + '</div></div>';
+      (idx.groups.length ? '<select class="pick glass" id="group-pick" aria-label="Field service group">' + opts + '</select>' : '') + '</div>' +
+      '<div id="results" style="display:flex;flex-direction:column;gap:18px">' + flockList() + '</div></div>';
   }
 
   function viewPerson(p) {
-    var vs = idx.byPub[p.id] || [], l = vs[0], w = l ? daysSince(l.date) : null;
+    var vs = idx.byPub[p.id] || [], l = vs[0], w = l ? daysSince(l.date) : null, st = state(p);
     var sub = [p.rank || 'Publisher', p.appointedWife ? 'Appointed wife' : '', p.group ? p.group + ' group' : ''].filter(Boolean).join(' · ');
+    var frac = w === null ? 1 : Math.min(1, Math.max(0.02, w / od()));
+    var arc = '<svg class="arc" viewBox="0 0 116 116" aria-hidden="true"><circle cx="58" cy="58" r="54" fill="none" stroke="var(--fill)" stroke-width="5"/>' +
+      '<circle cx="58" cy="58" r="54" fill="none" stroke="' + STATUS[st].color + '" stroke-width="5" stroke-linecap="round" pathLength="100" stroke-dasharray="' + (frac * 100) + ' 100"/></svg>';
     return '<div class="screen">' +
-      '<div class="nav"><button class="link" data-action="back">' + I.back + ' Flock</button><button class="link" data-action="edit" data-id="' + esc(p.id) + '">Edit</button></div>' +
-      '<div class="hero"><span class="av big" aria-hidden="true">' + esc(initials(p.name)) + '</span><h1>' + esc(p.name) + '</h1><p>' + esc(sub) + '</p>' +
-      (p.note ? '<p>' + esc(p.note) + '</p>' : '') + '</div>' +
-      '<div class="group"><div class="row-plain"><span>Last visit</span><span>' + (l ? esc(fmtDate(l.date)) : 'Never') + '</span></div>' +
-      '<div class="row-plain"><span>Waiting</span><span' + (w === null || w > od() ? ' style="color:var(--warn);font-weight:600"' : '') + '>' +
-      (w === null ? 'Not visited yet' : w <= 0 ? 'Visited today' : w + (w === 1 ? ' day' : ' days')) + '</span></div></div>' +
-      '<button class="big-btn" data-action="log" data-id="' + esc(p.id) + '">Log a Visit</button>' +
-      '<h2 class="label">Visits</h2>' +
-      (vs.length ? '<div class="group">' + vs.map(function (v) {
-        return '<button class="note" data-action="visit" data-id="' + esc(v.id) + '"><span class="top"><b>' + esc(fmtDate(v.date)) + '</b>' +
-          (v.followUp ? '<span class="flag">Follow up</span>' : '') + '</span><span class="who">' + esc(who(v)) + '</span>' +
-          (v.notes ? '<p>' + esc(v.notes) + '</p>' : '') + '</button>';
-      }).join('') + '</div>' : '<div class="group empty"><span>No visits yet.</span></div>') +
+      '<div class="nav"><button class="link" data-action="back">' + I.back + ' Back</button><button class="link" data-action="edit" data-id="' + esc(p.id) + '">Edit</button></div>' +
+      '<div class="glass hero rise"><span class="av big" aria-hidden="true">' + arc + esc(initials(p.name)) + '</span><h1>' + esc(p.name) + '</h1><p>' + esc(sub) + '</p>' +
+      (p.note ? '<p>' + esc(p.note) + '</p>' : '') +
+      '<div class="stat-row"><div class="stat"><small>Last visit</small><b>' + (l ? esc(fmtDate(l.date)) : 'Never') + '</b></div>' +
+      '<div class="stat"><small>' + STATUS[st].label + '</small><b style="color:' + STATUS[st].color + '">' +
+      (w === null ? '—' : w <= 0 ? 'Today' : w + (w === 1 ? ' day' : ' days')) + '</b></div></div></div>' +
+      '<button class="cta rise" data-action="log" data-id="' + esc(p.id) + '">' + I.plus + 'Log a Visit</button>' +
+      (vs.length ? '<div class="glass list"><div class="card-head"><h2>Visits</h2></div>' + vs.map(function (v) { return noteRow(v, false); }).join('') + '</div>'
+        : '<div class="glass empty"><span>No visits yet.</span></div>') +
       '<p class="foot">Notes are seen only by the elders.</p></div>';
   }
 
-  function viewVisits() {
-    var sy = serviceYear(), mine = S.meId;
-    var year = S.data.visits.filter(function (v) { return v.date >= sy.start && v.date <= sy.end; });
-    var byMe = year.filter(function (v) { return (v.elderIds || []).indexOf(mine) >= 0; }).length;
-    var seen = {}; year.forEach(function (v) { seen[v.publisherId] = 1; });
-    var follow = S.data.publishers.filter(function (p) { var l = last(p); return l && l.followUp; }).sort(byNeed);
-    var recent = S.data.visits.slice().sort(visitOrder).slice(0, 40);
-    var h = '<div class="screen">' + centeredHead('Visits', sy.label + ' service year') +
-      '<div class="group"><div class="row-plain"><span>Visits this year</span><span>' + year.length + '</span></div>' +
-      '<div class="row-plain"><span>Visits you went on</span><span>' + byMe + '</span></div>' +
-      '<div class="row-plain"><span>Publishers seen</span><span>' + Object.keys(seen).length + '</span></div></div>';
-    h += block('Needs a follow-up', follow);
-    h += '<h2 class="label">Recent</h2>';
-    h += recent.length ? '<div class="group">' + recent.map(function (v) {
-      var p = pub(v.publisherId);
-      return '<button class="note" data-action="visit" data-id="' + esc(v.id) + '"><span class="top"><b>' + esc(p ? p.name : v.publisherName) + '</b><span>' + esc(fmtDate(v.date, true)) + '</span></span>' +
-        '<span class="who">' + esc(who(v)) + '</span></button>';
-    }).join('') + '</div>' : empty('No visits yet', 'Tap Log a Visit on the Flock tab to add the first one.');
-    return h + '</div>';
-  }
-
   function viewSettings() {
-    var m = me(), cong = (S.data.settings && S.data.settings.congregationName) || '';
-    var els = elders();
-    var h = '<div class="screen">' + centeredHead('Settings') +
-      '<h2 class="label">You</h2><div class="group">' +
+    var m = me(), cong = (S.data.settings && S.data.settings.congregationName) || '', els = elders();
+    var h = '<div class="screen"><div class="top"><h1 class="title">Settings</h1></div>' +
+      '<div class="glass list">' +
       (m ? '<div class="cell"><span class="av" aria-hidden="true">' + esc(initials(m.name)) + '</span><span class="txt"><b>' + esc(m.name) + '</b><small>Using Embrace on this phone</small></span></div>' : '') +
       '<button class="action" data-action="switch">Not you? Choose your name</button></div>' +
-      '<h2 class="label">Congregation</h2><div class="group">' +
+      '<h2 class="label">Congregation</h2><div class="glass list">' +
       '<div class="field"><label for="s-cong">Name</label><input id="s-cong" type="text" value="' + esc(cong) + '" placeholder="Congregation name"></div>' +
       '<div class="field"><label for="s-od">Overdue after</label><select id="s-od">' + [[90, '3 months'], [120, '4 months'], [180, '6 months'], [365, '1 year']].map(function (o) {
         return '<option value="' + o[0] + '"' + (od() === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
       }).join('') + '</select></div></div>' +
       '<h2 class="label">Elders</h2>' +
-      (els.length ? '<div class="group">' + els.map(function (p) { return cell(p); }).join('') + '</div>' : '') +
-      '<p class="foot" style="text-align:left;margin-top:-6px">Anyone marked Elder can pick his name when he first opens Embrace.</p>' +
-      '<h2 class="label">Publishers</h2><div class="group">' +
+      (els.length ? '<div class="glass list">' + els.map(function (p) { return cell(p); }).join('') + '</div>' : '') +
+      '<p class="foot" style="text-align:left;margin-top:-8px">Anyone marked Elder can pick his name the first time he opens Embrace.</p>' +
+      '<h2 class="label">Publishers</h2><div class="glass list">' +
       '<button class="action" data-action="new">Add a person</button>' +
       '<button class="action" data-action="import-pick">Import a list (CSV)</button>' +
       '<div class="row-plain"><span>Total</span><span>' + S.data.publishers.length + '</span></div></div>' +
       '<input id="import-file" type="file" accept=".csv,text/csv,text/plain" hidden>';
-    if (store.mode === 'live') h += '<div class="group"><button class="action" data-action="code-change">Change congregation code</button></div>';
-    else h += '<div class="group">' + (S.confirmReset
+    if (store.mode === 'live') h += '<div class="glass list"><button class="action" data-action="code-change">Change congregation code</button></div>';
+    else h += '<div class="glass list">' + (S.confirmReset
       ? '<div class="row-plain"><span>Erase everything in this preview?</span></div><button class="action red" data-action="do-reset">Erase preview</button><button class="action" data-action="cancel-reset">Keep it</button>'
       : '<button class="action red" data-action="reset">Reset preview</button>') + '</div>';
     return h + '<p class="foot">Embrace ' + VERSION + (store.mode === 'demo' ? ' · Preview: changes stay on this phone' : '') + '</p></div>';
   }
 
   /* ---------------- first open ---------------- */
+  function pinBoxes(v) {
+    var h = '';
+    for (var i = 0; i < 4; i++) h += '<span class="glass' + (i === v.length ? ' on' : '') + '">' + (v[i] ? '•' : '') + '</span>';
+    return h;
+  }
   function viewGate() {
     if (S.status === 'loading' || (S.status === 'ready' && !S.loaded)) {
-      return '<div class="welcome">' + sheep(96, 'bob') + '<h1>Embrace</h1><p>Opening…</p></div>';
+      return '<div class="welcome">' + sheep(110, 'bob') + '<h1>Embrace</h1><p>Opening…</p></div>';
     }
     if (S.status === 'error') {
-      return '<div class="welcome">' + sheep(96, 'bob') + '<h1>Embrace</h1><p>' + esc(S.error) + '</p><button class="big-btn" data-action="reload">Try again</button></div>';
+      return '<div class="welcome">' + sheep(110, 'bob') + '<h1>Embrace</h1><p>' + esc(S.error) + '</p><button class="cta" data-action="reload">Try again</button></div>';
     }
     if (S.status === 'code' || S.status === 'setcode') {
       var setting = S.status === 'setcode';
-      return '<div class="welcome">' + sheep(96, 'bob') + '<h1>' + (setting ? 'Create a code' : 'Welcome') + '</h1>' +
-        '<p>' + (setting ? 'Make up a 4-digit code and give it to the other elders. Each phone enters it once.' : 'Enter the 4-digit congregation code. You only do this once on this phone.') + '</p>' +
-        '<label class="sr" for="gate-code">Congregation code</label><input id="gate-code" class="code" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" spellcheck="false" placeholder="••••">' +
-        '<p class="err" id="gate-err" role="alert" hidden></p>' +
-        '<button class="big-btn" data-action="' + (setting ? 'code-create' : 'code-enter') + '"' + (S.busy ? ' disabled' : '') + '>Continue</button></div>';
+      return '<div class="welcome">' + sheep(110, 'bob') + '<h1>' + (setting ? 'Create a code' : 'Welcome') + '</h1>' +
+        '<p>' + (setting ? 'Choose a 4-digit code for your elders. Each phone enters it once.' : 'Enter the 4-digit congregation code. You only do this once.') + '</p>' +
+        '<label class="pin" id="pin" for="gate-code">' + pinBoxes('') + '</label>' +
+        '<input id="gate-code" class="pin-input" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" aria-label="Congregation code">' +
+        '<p class="err" id="gate-err" role="alert" hidden></p></div>';
     }
-    // Who are you?
-    var els = elders(), h = '<div class="welcome">' + sheep(96, 'bob') + '<h1>Who are you?</h1><p>Tap your name. Embrace will remember you on this phone.</p>';
+    var els = elders(), h = '<div class="welcome">' + sheep(110, 'bob') + '<h1>Who are you?</h1>';
     if (!S.whoAll && els.length) {
-      h += '<div class="group list">' + els.map(function (p) { return cell(p, 'iam'); }).join('') + '</div>' +
-        '<button class="quiet-btn" data-action="who-all">My name is not here</button>';
-    } else if (S.data.publishers.length) {
-      var q = S.whoQuery.trim().toLowerCase();
-      var list = S.data.publishers.filter(function (p) { return isActive(p) && (!q || p.name.toLowerCase().indexOf(q) >= 0); }).sort(byName).slice(0, 60);
-      h += '<label class="search" style="width:100%;max-width:420px">' + I.search + '<span class="sr">Find your name</span><input id="who-search" type="search" autocomplete="off" placeholder="Find your name" value="' + esc(S.whoQuery) + '"></label>' +
-        '<div class="group list" id="who-list">' + list.map(function (p) { return cell(p, 'iam'); }).join('') + '</div>' +
-        (els.length ? '<button class="quiet-btn" data-action="who-elders">Show only elders</button>' : '');
-    } else {
-      h += '<div class="group list"><div class="field"><label for="who-name">Your name</label><input id="who-name" type="text" placeholder="First and last name" autocomplete="name"></div></div>' +
-        '<button class="big-btn" data-action="iam-new">Continue</button>';
+      return h + '<p>Tap your name. Embrace will remember you on this phone.</p>' +
+        '<div class="glass list">' + els.map(function (p) { return cell(p, 'iam', true); }).join('') + '</div>' +
+        '<button class="quiet" data-action="who-all">My name isn\'t here</button></div>';
     }
+    h += '<p>Type your name. Embrace will remember you on this phone.</p>' +
+      '<label class="search glass">' + I.search + '<span class="sr">Your name</span><input id="who-search" type="search" autocomplete="off" placeholder="Your name" value="' + esc(S.whoQuery) + '"></label>' +
+      '<div id="who-list" style="width:100%;max-width:420px">' + whoResults() + '</div>';
+    if (els.length) h += '<button class="quiet" data-action="who-elders">Show the elders</button>';
     return h + '</div>';
+  }
+  function whoResults() {
+    var q = S.whoQuery.trim().toLowerCase();
+    if (q.length < 2) return '';
+    var list = S.data.publishers.filter(function (p) { return p.name.toLowerCase().indexOf(q) >= 0; }).sort(byName).slice(0, 6);
+    var h = list.length ? '<div class="glass list">' + list.map(function (p) { return cell(p, 'iam', true); }).join('') + '</div>' : '';
+    if (!list.length) h += '<button class="cta" data-action="iam-new" style="margin-top:4px">Continue as ' + esc(S.whoQuery.trim()) + '</button>';
+    return h;
   }
 
   function tabs() {
-    return '<div class="tabs"><nav aria-label="Main">' + [['flock', 'Flock'], ['visits', 'Visits'], ['settings', 'Settings']].map(function (t) {
+    return '<div class="tabs"><nav aria-label="Main">' + [['home', 'Home'], ['flock', 'Flock'], ['settings', 'Settings']].map(function (t) {
       return '<button data-action="tab" data-tab="' + t[0] + '"' + (S.tab === t[0] ? ' aria-current="page"' : '') + (S.hop === t[0] ? ' class="hop"' : '') + '>' + I[t[0]] + t[1] + '</button>';
     }).join('') + '</nav></div>';
   }
@@ -299,108 +371,116 @@
     return '<div class="grab" aria-hidden="true"></div><div class="sheet-head"><button class="link" data-action="close" style="justify-self:start">' + (leftLabel || 'Cancel') + '</button>' +
       '<h2 id="sheet-title">' + esc(title) + '</h2>' + (right || '<span></span>') + '</div>';
   }
-  function sheetPick() {
-    var q = (S.sheet.q || '').trim().toLowerCase();
-    var list = needOrder(S.data.publishers.filter(function (p) { return p.rank !== 'Removed' || q; })
-      .filter(function (p) { return !q || p.name.toLowerCase().indexOf(q) >= 0; })).slice(0, 50);
-    return head('Who did you visit?') +
-      '<label class="search">' + I.search + '<span class="sr">Find a name</span><input id="pick-search" type="search" autocomplete="off" placeholder="Type a name" value="' + esc(S.sheet.q || '') + '"></label>' +
-      '<div id="pick-list">' + pickList(list, q) + '</div>';
-  }
-  function pickList(list, q) {
-    if (!list.length) return '<div class="group empty"><span>No name matches.</span></div>';
+  function pickResults(q, forLog) {
+    var list = needOrder(S.data.publishers.filter(function (p) { return (p.rank !== 'Removed' || q) && (!q || p.name.toLowerCase().indexOf(q) >= 0); })).slice(0, q ? 40 : 6);
+    if (!list.length) return '<div class="glass empty"><span>No name matches.</span></div>';
     return (q ? '' : '<h2 class="label" style="margin-bottom:8px">Waiting the longest</h2>') +
-      '<div class="group">' + list.map(function (p) { return cell(p, 'pick'); }).join('') + '</div>';
+      '<div class="glass list">' + list.map(function (p) { return cell(p, forLog ? 'pick' : 'open'); }).join('') + '</div>';
+  }
+  function sheetPick(forLog) {
+    var q = (S.sheet.q || '').trim().toLowerCase();
+    return head(forLog ? 'Who did you visit?' : 'Find someone', null, 'Close') +
+      '<label class="search glass">' + I.search + '<span class="sr">Find a name</span><input id="pick-search" type="search" autocomplete="off" placeholder="Type a name" value="' + esc(S.sheet.q || '') + '"></label>' +
+      '<div id="pick-list">' + pickResults(q, forLog) + '</div>';
   }
   function sheetLog(p) {
-    var sh = S.sheet;
-    var els = elders();
-    if (S.meId && !els.some(function (e) { return e.id === S.meId; }) && me()) els.unshift(me());
+    var sh = S.sheet, els = elders();
+    if (S.meId && me() && !els.some(function (e) { return e.id === S.meId; })) els.unshift(me());
     els.sort(function (a, b) { return a.id === S.meId ? -1 : b.id === S.meId ? 1 : byName(a, b); });
     return head('Log a Visit', '<button class="link" data-action="save-visit">Save</button>') +
-      '<div class="hero" style="gap:2px"><span class="av" aria-hidden="true">' + esc(initials(p.name)) + '</span><h1 style="font-size:22px">' + esc(p.name) + '</h1></div>' +
-      '<h2 class="label">Who went with you?</h2><div class="group"><div class="chips" role="group" aria-label="Elders on this visit">' +
+      '<div class="hero" style="padding:4px 0 0;gap:4px"><span class="av" aria-hidden="true">' + esc(initials(p.name)) + '</span><h1 style="font-size:24px;margin-top:4px">' + esc(p.name) + '</h1></div>' +
+      '<h2 class="label">Who went with you?</h2><div class="glass"><div class="chips" role="group" aria-label="Elders on this visit">' +
       els.map(function (e) {
-        var on = sh.with.indexOf(e.id) >= 0;
-        return '<button class="chip" data-action="with" data-id="' + esc(e.id) + '" aria-pressed="' + on + '">' + esc(e.id === S.meId ? 'Me' : e.name) + '</button>';
+        return '<button class="chip" data-action="with" data-id="' + esc(e.id) + '" aria-pressed="' + (sh.with.indexOf(e.id) >= 0) + '">' + esc(e.id === S.meId ? 'Me' : e.name) + '</button>';
       }).join('') + '</div></div>' +
-      '<h2 class="label">What day?</h2><div class="group" id="cal">' + calendar() + '</div>' +
-      '<h2 class="label"><label for="v-notes">Notes</label></h2><div class="group"><textarea id="v-notes" placeholder="What was shared, how they are doing, anything to follow up on"></textarea>' +
+      '<h2 class="label">What day?</h2><div class="glass" id="cal">' + calendar() + '</div>' +
+      '<h2 class="label"><label for="v-notes">Notes</label></h2><div class="glass list"><textarea id="v-notes" placeholder="What was shared, how they are doing, anything to follow up on"></textarea>' +
       '<label class="field" for="v-fu"><span>Needs a follow-up</span><input class="switch" id="v-fu" type="checkbox"></label></div>' +
       '<p class="err" id="v-err" role="alert" hidden></p>' +
-      '<button class="big-btn" data-action="save-visit">Save Visit</button>';
+      '<button class="cta" data-action="save-visit">Save Visit</button>';
   }
   function calendar() {
-    var sh = S.sheet, y = sh.calY, m = sh.calM;
-    var first = new Date(y, m, 1), startDow = first.getDay(), days = new Date(y, m + 1, 0).getDate();
-    var today = todayStr(), now = new Date();
+    var sh = S.sheet, y = sh.calY, m = sh.calM, today = todayStr(), now = new Date();
+    var startDow = new Date(y, m, 1).getDay(), days = new Date(y, m + 1, 0).getDate();
     var canNext = y < now.getFullYear() || (y === now.getFullYear() && m < now.getMonth());
-    var h = '<div style="padding:10px 10px 14px"><div style="display:flex;align-items:center;justify-content:space-between;padding:0 4px 8px">' +
-      '<button class="link" data-action="cal" data-step="-1" aria-label="Previous month">' + I.left + '</button>' +
-      '<b style="font-size:18px">' + MON[m] + ' ' + y + '</b>' +
-      '<button class="link" data-action="cal" data-step="1" aria-label="Next month"' + (canNext ? '' : ' disabled style="opacity:.3"') + '>' + I.right + '</button></div>' +
-      '<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;text-align:center">' +
-      ['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(function (d) { return '<span style="font-size:13px;color:var(--fg2);font-weight:600;padding-bottom:4px">' + d + '</span>'; }).join('');
+    var h = '<div class="cal"><div class="cal-head"><button class="link" data-action="cal" data-step="-1" aria-label="Previous month">' + I.left + '</button>' +
+      '<b>' + MON[m] + ' ' + y + '</b><button class="link" data-action="cal" data-step="1" aria-label="Next month"' + (canNext ? '' : ' disabled style="opacity:.25"') + '>' + I.right + '</button></div>' +
+      '<div class="cal-grid">' + ['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(function (d) { return '<span class="dow">' + d + '</span>'; }).join('');
     for (var i = 0; i < startDow; i++) h += '<span></span>';
     for (var d = 1; d <= days; d++) {
-      var s = y + '-' + pad(m + 1) + '-' + pad(d), future = s > today, sel = s === sh.date, isToday = s === today;
-      h += '<button data-action="day" data-date="' + s + '"' + (future ? ' disabled' : '') + ' aria-pressed="' + sel + '" aria-label="' + MON[m] + ' ' + d + '"' +
-        ' style="height:44px;border:none;border-radius:22px;font-size:17px;font-variant-numeric:tabular-nums;' +
-        (sel ? 'background:var(--accent);color:var(--accent-ink);font-weight:700;' : isToday ? 'background:transparent;color:var(--accent);font-weight:700;box-shadow:inset 0 0 0 2px var(--accent);' : 'background:transparent;') +
-        (future ? 'opacity:.3;' : '') + '">' + d + '</button>';
+      var s = y + '-' + pad(m + 1) + '-' + pad(d);
+      h += '<button data-action="day" data-date="' + s + '"' + (s === today ? ' class="today"' : '') + (s > today ? ' disabled' : '') +
+        ' aria-pressed="' + (s === sh.date) + '" aria-label="' + MON[m] + ' ' + d + '">' + d + '</button>';
     }
     return h + '</div></div>';
   }
   function sheetVisit(v) {
     var p = pub(v.publisherId);
     var h = head('Visit', null, 'Close') +
-      '<div class="group"><div class="row-plain"><span>Visited</span><span>' + esc(p ? p.name : v.publisherName) + '</span></div>' +
+      '<div class="glass list"><div class="row-plain"><span>Visited</span><span>' + esc(p ? p.name : v.publisherName) + '</span></div>' +
       '<div class="row-plain"><span>Date</span><span>' + esc(fmtDate(v.date)) + '</span></div>' +
       '<div class="row-plain"><span>Who went</span><span>' + esc(who(v)) + '</span></div>' +
       (v.followUp ? '<div class="row-plain"><span>Follow-up</span><span class="flag">Needed</span></div>' : '') + '</div>' +
-      '<h2 class="label">Notes</h2><div class="group" style="padding:14px 16px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5">' +
+      '<h2 class="label">Notes</h2><div class="glass" style="padding:16px 18px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5">' +
       (v.notes ? esc(v.notes) : '<span style="color:var(--fg2)">No notes.</span>') + '</div>';
-    if (p && S.pubId !== p.id) h += '<button class="quiet-btn" data-action="open" data-id="' + esc(p.id) + '">Open ' + esc(firstName(p.name)) + '\'s page</button>';
+    if (p && S.pubId !== p.id) h += '<button class="quiet glass" data-action="open" data-id="' + esc(p.id) + '">Open ' + esc(firstName(p.name)) + '\'s page</button>';
     h += S.sheet.confirm
-      ? '<div class="group"><div class="row-plain"><span>Delete this visit?</span></div><button class="action red" data-action="delete-visit" data-id="' + esc(v.id) + '">Delete</button><button class="action" data-action="unconfirm">Keep it</button></div>'
-      : '<button class="quiet-btn red" data-action="confirm">Delete visit</button>';
+      ? '<div class="glass list"><div class="row-plain"><span>Delete this visit?</span></div><button class="action red" data-action="delete-visit" data-id="' + esc(v.id) + '">Delete</button><button class="action" data-action="unconfirm">Keep it</button></div>'
+      : '<button class="quiet red" data-action="confirm">Delete visit</button>';
     return h;
+  }
+  function sheetStatus(st) {
+    var list = needOrder(flock().filter(function (p) { return state(p) === st; }));
+    return head(STATUS[st].long, null, 'Close') +
+      '<p class="sub" style="margin-top:-6px">' + list.length + (list.length === 1 ? ' person' : ' people') + '</p>' +
+      (list.length ? '<div class="glass list">' + list.map(function (p) { return cell(p); }).join('') + '</div>' : '<div class="glass empty"><span>No one here right now.</span></div>');
+  }
+  function sheetAllVisits() {
+    var sy = serviceYear();
+    var year = S.data.visits.filter(function (v) { return v.date >= sy.start && v.date <= sy.end; });
+    var mine = year.filter(function (v) { return (v.elderIds || []).indexOf(S.meId) >= 0; }).length;
+    var all = S.data.visits.slice().sort(visitOrder).slice(0, 100);
+    return head('Visits', null, 'Close') +
+      '<div class="glass list"><div class="row-plain"><span>This service year</span><span>' + year.length + '</span></div>' +
+      '<div class="row-plain"><span>Visits you went on</span><span>' + mine + '</span></div></div>' +
+      (all.length ? '<div class="glass list">' + all.map(function (v) { return noteRow(v, true); }).join('') + '</div>' : '');
   }
   function sheetEdit(p) {
     var isNew = !p; p = p || { name: '', rank: 'Publisher', group: S.group !== 'all' ? S.group : '', appointedWife: false, note: '' };
     var h = head(isNew ? 'Add a Person' : 'Edit', '<button class="link" data-action="save-person">Save</button>') +
-      '<div class="group">' +
+      '<div class="glass list">' +
       '<div class="field"><label for="p-name">Name</label><input id="p-name" type="text" value="' + esc(p.name) + '" placeholder="Full name" autocomplete="off"></div>' +
       '<div class="field"><label for="p-rank">Privilege</label><select id="p-rank">' + RANKS.map(function (r) { return '<option' + (r === (p.rank || 'Publisher') ? ' selected' : '') + '>' + r + '</option>'; }).join('') + '</select></div>' +
       '<label class="field" for="p-wife"><span>Appointed wife</span><input class="switch" id="p-wife" type="checkbox"' + (p.appointedWife ? ' checked' : '') + '></label>' +
       '<div class="field"><label for="p-group">Group</label><input id="p-group" type="text" list="p-groups" value="' + esc(p.group || '') + '" placeholder="Overseer\'s name"></div>' +
       '<datalist id="p-groups">' + idx.groups.map(function (g) { return '<option value="' + esc(g) + '"></option>'; }).join('') + '</datalist>' +
       '<div class="field"><label for="p-note">Note</label><input id="p-note" type="text" value="' + esc(p.note || '') + '" placeholder="e.g. Away until April"></div></div>' +
-      '<p class="err" id="p-err" role="alert" hidden></p><button class="big-btn" data-action="save-person">Save</button>';
+      '<p class="err" id="p-err" role="alert" hidden></p><button class="cta" data-action="save-person">Save</button>';
     if (!isNew) {
       h += S.sheet.confirm
-        ? '<div class="group"><div class="row-plain"><span>Remove ' + esc(firstName(p.name)) + ' and their visits?</span></div><button class="action red" data-action="delete-person">Remove</button><button class="action" data-action="unconfirm">Keep</button></div>'
-        : '<button class="quiet-btn red" data-action="confirm">Remove from Embrace</button>';
+        ? '<div class="glass list"><div class="row-plain"><span>Remove ' + esc(firstName(p.name)) + ' and their visits?</span></div><button class="action red" data-action="delete-person">Remove</button><button class="action" data-action="unconfirm">Keep</button></div>'
+        : '<button class="quiet red" data-action="confirm">Remove from Embrace</button>';
     }
     return h;
   }
   function sheetImport(sh) {
     var g = {}; sh.rows.forEach(function (r) { g[r.group || 'No group'] = (g[r.group || 'No group'] || 0) + 1; });
-    return head('Import', null, 'Close') + '<div class="group">' + Object.keys(g).sort().map(function (k) {
+    return head('Import', null, 'Close') + '<div class="glass list">' + Object.keys(g).sort().map(function (k) {
       return '<div class="row-plain"><span>' + esc(k) + '</span><span>' + g[k] + '</span></div>';
     }).join('') + '</div>' +
       (sh.skipped ? '<p class="foot">' + sh.skipped + ' already in Embrace will be skipped.</p>' : '') +
-      (sh.rows.length ? '<button class="big-btn" data-action="do-import">Add ' + sh.rows.length + ' people</button>' : '<p class="foot">Nothing new to add.</p>');
+      (sh.rows.length ? '<button class="cta" data-action="do-import">Add ' + sh.rows.length + ' people</button>' : '<p class="foot">Nothing new to add.</p>');
   }
   function sheetCode() {
     return head('Congregation Code', '<button class="link" data-action="code-save">Save</button>') +
-      '<div class="group"><div class="field"><label for="new-code">New code</label><input id="new-code" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="4 digits"></div></div>' +
+      '<div class="glass list"><div class="field"><label for="new-code">New code</label><input id="new-code" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="4 digits"></div></div>' +
       '<p class="foot">Phones already using Embrace stay unlocked. New phones need the new code.</p>' +
-      '<p class="err" id="c-err" role="alert" hidden></p><button class="big-btn" data-action="code-save">Save</button>';
+      '<p class="err" id="c-err" role="alert" hidden></p><button class="cta" data-action="code-save">Save</button>';
   }
 
   /* ---------------- render ---------------- */
   var root = document.getElementById('app');
+  root.insertAdjacentHTML('beforebegin', scene());
   root.innerHTML = '<main id="main"></main><div id="tabs"></div><div id="sheet"></div><div id="fx" aria-live="polite"></div>';
   var $main = document.getElementById('main'), $tabs = document.getElementById('tabs'), $sheet = document.getElementById('sheet'), $fx = document.getElementById('fx');
 
@@ -411,18 +491,22 @@
     else {
       var p = S.pubId ? pub(S.pubId) : null;
       if (S.pubId && !p) S.pubId = null;
-      $main.innerHTML = S.tab === 'flock' ? (p ? viewPerson(p) : viewFlock()) : S.tab === 'visits' ? viewVisits() : viewSettings();
+      $main.innerHTML = p ? viewPerson(p) : S.tab === 'home' ? viewHome() : S.tab === 'flock' ? viewFlock() : viewSettings();
       $tabs.innerHTML = tabs();
       S.hop = null;
+      if (!p && S.tab === 'home') drawRing();
     }
     if (keep) { var el = document.getElementById(keep[0]); if (el) { el.focus(); try { el.setSelectionRange(keep[1], keep[1]); } catch (e) { /* ignore */ } } }
   }
   function renderSheet() {
     var sh = S.sheet, body = '';
     if (!sh) { $sheet.innerHTML = ''; document.body.style.overflow = ''; return; }
-    if (sh.type === 'pick') body = sheetPick();
+    if (sh.type === 'pick') body = sheetPick(true);
+    else if (sh.type === 'find') body = sheetPick(false);
     else if (sh.type === 'log') { var p = pub(sh.id); if (!p) return closeSheet(); body = sheetLog(p); }
     else if (sh.type === 'visit') { var v = visit(sh.id); if (!v) return closeSheet(); body = sheetVisit(v); }
+    else if (sh.type === 'status') body = sheetStatus(sh.st);
+    else if (sh.type === 'visits') body = sheetAllVisits();
     else if (sh.type === 'edit') body = sheetEdit(sh.id ? pub(sh.id) : null);
     else if (sh.type === 'import') body = sheetImport(sh);
     else if (sh.type === 'code') body = sheetCode();
@@ -430,12 +514,12 @@
     document.body.style.overflow = 'hidden';
   }
   function toast(msg) {
-    $fx.innerHTML = '<div class="toast">' + esc(msg) + '</div>';
-    clearTimeout(toast.t); toast.t = setTimeout(function () { $fx.innerHTML = ''; }, 2200);
+    $fx.innerHTML = '<div class="toast glass">' + esc(msg) + '</div>';
+    clearTimeout(toast.t); toast.t = setTimeout(function () { $fx.innerHTML = ''; }, 2300);
   }
   function trot(msg) {
-    $fx.innerHTML = '<div class="trot"><div class="runner">' + sheep(56) + '</div><div class="msg">' + esc(msg) + '</div></div>';
-    clearTimeout(toast.t); toast.t = setTimeout(function () { $fx.innerHTML = ''; }, 2000);
+    $fx.innerHTML = '<div class="trot"><div class="runner">' + sheep(64) + '</div><div class="msg glass">' + esc(msg) + '</div></div>';
+    clearTimeout(toast.t); toast.t = setTimeout(function () { $fx.innerHTML = ''; }, 2400);
   }
 
   /* back button (Android) and swipe-back (iPhone) close sheets and pages */
@@ -445,7 +529,7 @@
   window.addEventListener('popstate', function () {
     if (layers > 0) layers--;
     if (S.sheet) { S.sheet = null; renderSheet(); }
-    else if (S.pubId) { S.pubId = null; render(); window.scrollTo(0, S.flockScroll); }
+    else if (S.pubId) { S.pubId = null; render(); window.scrollTo(0, S.scroll[S.tab] || 0); }
   });
   function openSheet(sh) { var had = !!S.sheet; S.sheet = sh; renderSheet(); if (!had) push(); }
   function swapSheet(sh) { S.sheet = sh; renderSheet(); }
@@ -453,8 +537,9 @@
   function openPerson(id) {
     if (S.sheet) { S.sheet = null; renderSheet(); if (!PREVIEW && layers > 0) { layers--; try { history.replaceState({ embrace: layers }, ''); } catch (e) { /* ignore */ } } }
     var was = !!S.pubId;
-    if (!S.pubId && S.tab === 'flock') S.flockScroll = window.scrollY;
-    S.tab = 'flock'; S.pubId = id; render(); window.scrollTo(0, 0);
+    if (!S.pubId) S.scroll[S.tab] = window.scrollY;
+    if (S.tab === 'settings') S.tab = 'flock';
+    S.pubId = id; render(); window.scrollTo(0, 0);
     if (!was) push();
   }
   function logSheet(id) {
@@ -463,15 +548,24 @@
   }
   function showErr(id, msg) { var el = document.getElementById(id); if (el) { el.textContent = msg; el.hidden = false; } }
   function fail(id) { return function (e) { S.busy = false; showErr(id, window.EmbraceStore.friendly(e)); }; }
-  function setMe(id) { S.meId = id; lsSet('embrace-me', id); S.whoAll = false; S.whoQuery = ''; S.tab = 'flock'; }
+  function setMe(id) { S.meId = id; lsSet('embrace-me', id); S.whoAll = false; S.whoQuery = ''; S.tab = 'home'; S.ringDrawn = false; }
+  function focusLater(id) { setTimeout(function () { var s = document.getElementById(id); if (s) s.focus(); }, 380); }
 
   /* ---------------- actions ---------------- */
   var A = {
-    tab: function (el) { S.tab = el.dataset.tab; S.hop = el.dataset.tab; S.pubId = null; S.confirmReset = false; render(); window.scrollTo(0, 0); },
+    tab: function (el) {
+      var t = el.dataset.tab;
+      if (S.sheet) { S.sheet = null; renderSheet(); }
+      S.tab = t; S.hop = t; S.pubId = null; S.confirmReset = false;
+      render(); window.scrollTo(0, 0);
+    },
     mode: function (el) { S.mode = el.dataset.mode; saveUi(); render(); },
     open: function (el) { openPerson(el.dataset.id); },
-    back: function () { pop(function () { S.pubId = null; render(); window.scrollTo(0, S.flockScroll); }); },
-    'log-start': function () { openSheet({ type: 'pick', q: '' }); setTimeout(function () { var s = document.getElementById('pick-search'); if (s) s.focus(); }, 300); },
+    back: function () { pop(function () { S.pubId = null; render(); window.scrollTo(0, S.scroll[S.tab] || 0); }); },
+    'log-start': function () { openSheet({ type: 'pick', q: '' }); focusLater('pick-search'); },
+    find: function () { openSheet({ type: 'find', q: '' }); focusLater('pick-search'); },
+    status: function (el) { openSheet({ type: 'status', st: el.dataset.st }); },
+    'all-visits': function () { openSheet({ type: 'visits' }); },
     pick: function (el) { swapSheet(logSheet(el.dataset.id)); },
     log: function (el) { openSheet(logSheet(el.dataset.id)); },
     with: function (el) {
@@ -517,7 +611,7 @@
       store.deletePublisher(id).then(function () { S.sheet = null; renderSheet(); S.pubId = null; render(); toast('Removed'); });
     },
     'import-pick': function () { var f = document.getElementById('import-file'); if (f) f.click(); },
-    'do-import': function () { var rows = S.sheet.rows; store.importRoster(rows).then(function () { closeSheet(); toast(rows.length + ' people added'); }); },
+    'do-import': function () { var rows = S.sheet.rows; store.importRoster(rows).then(function () { closeSheet(); S.ringDrawn = false; toast(rows.length + ' people added'); }); },
     switch: function () { S.meId = null; lsSet('embrace-me', null); S.pubId = null; render(); window.scrollTo(0, 0); },
     iam: function (el) {
       var id = el.dataset.id, p = pub(id);
@@ -527,14 +621,12 @@
       else setTimeout(go, 450);
     },
     'iam-new': function () {
-      var n = (document.getElementById('who-name').value || '').trim().replace(/\s+/g, ' ');
-      if (!n) return;
+      var n = S.whoQuery.trim().replace(/\s+/g, ' ');
+      if (n.length < 2) return;
       store.savePublisher({ name: n, rank: 'Elder', group: '', appointedWife: false, note: '' }).then(function (id) { setMe(id); render(); toast('Welcome, ' + firstName(n)); });
     },
-    'who-all': function () { S.whoAll = true; render(); },
+    'who-all': function () { S.whoAll = true; render(); focusLater('who-search'); },
     'who-elders': function () { S.whoAll = false; render(); },
-    'code-enter': function () { gateCode(store.enterCode); },
-    'code-create': function () { gateCode(store.createCode); },
     'code-change': function () { openSheet({ type: 'code' }); },
     'code-save': function () {
       var c = (document.getElementById('new-code').value || '').replace(/\D/g, '');
@@ -544,14 +636,17 @@
     reload: function () { location.reload(); },
     reset: function () { S.confirmReset = true; render(); },
     'cancel-reset': function () { S.confirmReset = false; render(); },
-    'do-reset': function () { S.confirmReset = false; S.meId = null; lsSet('embrace-me', null); store.resetDemo().then(function () { render(); }); }
+    'do-reset': function () { S.confirmReset = false; S.meId = null; S.ringDrawn = false; lsSet('embrace-me', null); store.resetDemo().then(function () { render(); }); }
   };
-  function gateCode(fn) {
-    var c = (document.getElementById('gate-code').value || '').replace(/\D/g, '');
-    if (c.length !== 4) return showErr('gate-err', 'The code is 4 digits.');
+  function gateCode(c) {
     if (S.busy) return;
     S.busy = true;
-    fn(c).then(function () { S.busy = false; }, function (e) { S.busy = false; render(); showErr('gate-err', e.message); });
+    var fn = S.status === 'setcode' ? store.createCode : store.enterCode;
+    fn(c).then(function () { S.busy = false; }, function (e) {
+      S.busy = false; render();
+      var pin = document.getElementById('pin'); if (pin) pin.classList.add('shake');
+      showErr('gate-err', e.message);
+    });
   }
 
   document.addEventListener('click', function (ev) {
@@ -563,16 +658,16 @@
   document.addEventListener('input', function (ev) {
     var t = ev.target;
     if (t.id === 'search') { S.query = t.value; var r = document.getElementById('results'); if (r) r.innerHTML = flockList(); }
-    if (t.id === 'who-search') { S.whoQuery = t.value; render(); }
-    if (t.id === 'gate-code') {
-      t.value = t.value.replace(/\D/g, '').slice(0, 4);
-      if (t.value.length === 4) A[S.status === 'setcode' ? 'code-create' : 'code-enter']();
-    }
+    if (t.id === 'who-search') { S.whoQuery = t.value; var w = document.getElementById('who-list'); if (w) w.innerHTML = whoResults(); }
     if (t.id === 'pick-search') {
       S.sheet.q = t.value;
-      var q = t.value.trim().toLowerCase();
-      var list = needOrder(S.data.publishers.filter(function (p) { return (p.rank !== 'Removed' || q) && (!q || p.name.toLowerCase().indexOf(q) >= 0); })).slice(0, 50);
-      document.getElementById('pick-list').innerHTML = pickList(list, q);
+      document.getElementById('pick-list').innerHTML = pickResults(t.value.trim().toLowerCase(), S.sheet.type === 'pick');
+    }
+    if (t.id === 'gate-code') {
+      t.value = t.value.replace(/\D/g, '').slice(0, 4);
+      var pin = document.getElementById('pin');
+      if (pin) { pin.classList.remove('shake'); pin.innerHTML = pinBoxes(t.value); }
+      if (t.value.length === 4) gateCode(t.value);
     }
   });
   document.addEventListener('change', function (ev) {
@@ -591,10 +686,7 @@
       r.readAsText(t.files[0]);
     }
   });
-  document.addEventListener('keydown', function (ev) {
-    if (ev.key === 'Escape' && S.sheet) closeSheet();
-    if (ev.key === 'Enter' && ev.target.id === 'gate-code') A[S.status === 'setcode' ? 'code-create' : 'code-enter']();
-  });
+  document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && S.sheet) closeSheet(); });
 
   /* ---------------- CSV import ---------------- */
   function parseCsv(text) {
@@ -646,7 +738,7 @@
         S.data = d; S.loaded = d.ready !== false; rebuild();
         if (S.meId && S.loaded && !pub(S.meId)) { S.meId = null; lsSet('embrace-me', null); }
         render();
-        if (S.sheet && S.sheet.type === 'visit') renderSheet();
+        if (S.sheet && (S.sheet.type === 'visit' || S.sheet.type === 'status')) renderSheet();
       });
     }
     render();
