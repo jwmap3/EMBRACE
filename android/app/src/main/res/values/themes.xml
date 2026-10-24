@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_bg">#2E6B4A</color>
+    <style name="Embrace" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/sky</item>
+        <item name="android:colorAccent">#2E6B4A</item>
+    </style>
+    <color name="sky">#DCE9E4</color>
+</resources>
