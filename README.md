@@ -15,13 +15,13 @@ The code is never stored in this repository. The first phone to open the connect
 2. **Build › Authentication › Get started › Sign-in method › Anonymous › Enable › Save.**
 3. **Build › Firestore Database › Create database** › choose the location nearest you › **Start in production mode**.
 4. **Firestore › Rules** tab › delete what's there › paste the contents of `firestore.rules` › **Publish**.
-5. **Project settings** (gear icon) › **Your apps** › **Web `</>`** › nickname `Embrace` › **Register app**. Copy the `firebaseConfig` block into `public/firebase-config.js` (or paste it to Claude).
+5. **Project settings** (gear icon) › **Your apps** › **Web `</>`** › nickname `Embrace` › **Register app**. Copy the `firebaseConfig` block into `public/firebase-config.js`. (Done: project `embrace-shepherding-bdb89`.)
 
-## Publishing from GitHub
-1. Firebase console › **Project settings › Service accounts › Generate new private key**. A `.json` file downloads.
-2. GitHub repo › **Settings › Secrets and variables › Actions › New repository secret**. Name: `FIREBASE_SERVICE_ACCOUNT`. Value: the whole contents of that file. Then delete the file.
-3. If your project ID is not exactly `embrace-shepherding`, change it in `.firebaserc` and `.github/workflows/deploy.yml`.
-4. Every push to `main` publishes the app to `https://<project-id>.web.app`.
+## Publishing (GitHub Pages)
+1. GitHub repo › **Settings › Pages** › under **Build and deployment**, set **Source** to **GitHub Actions**.
+2. Every push to `main` publishes the app to **https://jwmap3.github.io/EMBRACE/**. You can also run **Publish Embrace** from the Actions tab.
+
+The repository holds only the app's code. No names, notes or codes are ever stored here.
 
 ## First run
 1. Open the app link, create the 4-digit code, and on "Who are you?" tap **My name is not here** and find your name (or type it).
