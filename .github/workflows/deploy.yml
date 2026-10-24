@@ -1,5 +1,6 @@
 # Publishes Embrace to Firebase Hosting every time main is updated,
 # so every elder gets the new version the next time they open the app.
+# Skips quietly until the FIREBASE_SERVICE_ACCOUNT secret has been added.
 name: Deploy Embrace
 
 on:
@@ -10,11 +11,18 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      HAS_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT != '' }}
     steps:
       - uses: actions/checkout@v4
+        if: env.HAS_KEY == 'true'
       - uses: FirebaseExtended/action-hosting-deploy@v0
+        if: env.HAS_KEY == 'true'
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           channelId: live
           projectId: embrace-shepherding
+      - name: Waiting for Firebase
+        if: env.HAS_KEY != 'true'
+        run: echo "Add the FIREBASE_SERVICE_ACCOUNT secret (see README) to start publishing."
