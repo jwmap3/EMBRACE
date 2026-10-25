@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '3.9';
+  var VERSION = '3.10';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -355,8 +355,8 @@
     return '<div class="screen"><div class="top"><h1 class="title">The Flock</h1><span class="sub">' + S.data.publishers.length + ' people · longest wait first</span></div>' +
       '<label class="search glass">' + I.search + '<span class="sr">Find a name</span><input id="search" type="search" autocomplete="off" placeholder="Find a name" value="' + esc(S.query) + '"></label>' +
       '<div class="filters"><div class="seg glass" role="group" aria-label="Sort">' +
-      '<button data-action="mode" data-mode="priority" aria-pressed="' + (S.mode === 'priority') + '">Who\'s next</button>' +
       '<button data-action="mode" data-mode="everyone" aria-pressed="' + (S.mode === 'everyone') + '">Groups</button>' +
+      '<button data-action="mode" data-mode="priority" aria-pressed="' + (S.mode === 'priority') + '">All</button>' +
       '<button data-action="mode" data-mode="families" aria-pressed="' + (S.mode === 'families') + '">Families</button></div>' +
       (idx.groups.length ? '<select class="pick glass" id="group-pick" aria-label="Field service group">' + opts + '</select>' : '') + '</div>' +
       '<div id="results" style="display:flex;flex-direction:column;gap:18px">' + flockList() + '</div></div>';
