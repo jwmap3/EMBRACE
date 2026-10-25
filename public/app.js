@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '3.13';
+  var VERSION = '4.1';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -29,9 +29,9 @@
 
   var S = {
     status: 'loading', error: '', loaded: false,
-    data: { publishers: [], visits: [], settings: { overdueDays: 180 } },
+    data: { publishers: [], visits: [], settings: { overdueDays: 365 } },
     tab: 'home', mode: 'priority', group: 'all', query: '',
-    pubId: null, sheet: null, hop: null, scroll: {}, open: {},
+    pubId: null, sheet: null, hop: null, scroll: {}, open: {}, homeCal: { y: new Date().getFullYear(), m: new Date().getMonth() },
     meId: null, whoAll: false, whoQuery: '', busy: false, ringDrawn: false
   };
   var idx = { byPub: {}, groups: [] };
@@ -69,7 +69,7 @@
     var d = new Date(), y = d.getMonth() >= 8 ? d.getFullYear() + 1 : d.getFullYear();
     return { label: y, start: (y - 1) + '-09-01', end: y + '-08-31' };
   }
-  function od() { return +(S.data.settings && S.data.settings.overdueDays) || 180; }
+  function od() { return +(S.data.settings && S.data.settings.overdueDays) || 365; }
   function odText() { var d = od(); return d >= 365 ? 'year' : Math.round(d / 30) + ' months'; }
   function isActive(p) { return p.rank !== 'Inactive' && p.rank !== 'Removed'; }
   function isPriority(p) {
@@ -143,10 +143,13 @@
   var I = {
     home: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 8.5a2.6 2.6 0 0 1 4.2-1.2 2.6 2.6 0 0 1 4.3.6 2.6 2.6 0 0 1 1.7 4.4 2.6 2.6 0 0 1-2.6 3.2H9.2A2.6 2.6 0 0 1 7 12.6"/><ellipse cx="5.4" cy="10.6" rx="2.4" ry="2"/><path d="M9.5 15.5v3.5M15.5 15.5v3.5"/></svg>',
     flock: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21V8a4 4 0 0 1 8 0v1.5"/><path d="M17 9.5a1.4 1.4 0 0 1-2.8 0"/></svg>',
+    upcoming: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/><circle cx="12" cy="15" r="1.4" fill="currentColor" stroke="none"/></svg>',
     settings: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>',
     search: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>',
     back: '<svg width="12" height="20" viewBox="0 0 11 18" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2L2 9l7 7"/></svg>',
     chev: '<svg class="chev" width="8" height="14" viewBox="0 0 8 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 1l6 6-6 6"/></svg>',
+    chat: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>',
+    phone: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h4l2 5-2.5 1.5a11 11 0 0 0 6 6L16 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 5a2 2 0 0 1 2-2z"/></svg>',
     plus: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
     left: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>',
     right: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>'
@@ -256,6 +259,118 @@
       '<p class="sub" style="margin-top:-6px">' + done + ' of ' + list.length + ' visited in the last ' + odText() + '</p>' + h;
   }
 
+  /* ---------------- phones and planned visits ---------------- */
+  function digits(n) { var d = String(n || '').replace(/\D/g, ''); return d.length === 11 && d[0] === '1' ? d.slice(1) : d; }
+  function fmtPhone(n) { var d = digits(n); return d.length === 10 ? '(' + d.slice(0, 3) + ') ' + d.slice(3, 6) + '-' + d.slice(6) : n || ''; }
+  function brothers() {
+    return S.data.publishers.filter(function (p) { return p.rank === 'Elder' || p.rank === 'Ministerial Servant'; }).sort(byName);
+  }
+  function plans() {
+    var t = todayStr();
+    return (S.data.plans || []).filter(function (x) { return x.date >= t; }).sort(function (a, b) {
+      return a.date !== b.date ? (a.date < b.date ? -1 : 1) : String(a.time || '').localeCompare(String(b.time || ''));
+    });
+  }
+  function fmtTime(t) {
+    if (!t) return '';
+    var p = t.split(':'), h = +p[0], m = p[1] || '00';
+    return (h % 12 || 12) + ':' + m + (h < 12 ? ' AM' : ' PM');
+  }
+  var DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  function longDate(s) { var d = parseDay(s); return DOW[d.getDay()] + ', ' + MON[d.getMonth()] + ' ' + d.getDate(); }
+  function joinNames(list) { return list.length < 2 ? (list[0] || '') : list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1]; }
+  function draftText(sh) {
+    var bros = sh.withIds.map(pub).filter(Boolean), visit = sh.visitIds.map(pub).filter(Boolean), m = me();
+    var hi = bros.length === 1 ? 'Hi Brother ' + words(bros[0].name).slice(-1)[0] : 'Hi brothers';
+    var whom = visit.length ? ' to see ' + joinNames(visit.map(function (p) { return p.name; })) : '';
+    var when = sh.date ? ' on ' + longDate(sh.date) + (sh.time ? ' at ' + fmtTime(sh.time) : '') : '';
+    return hi + ', would you be available to go on a shepherding visit with me' + whom + when + '? Let me know if that works for you. Thank you!' + (m ? ' - ' + firstName(m.name) : '');
+  }
+  function smsLink(nums, body) { return 'sms:' + nums.join(',') + '?&body=' + encodeURIComponent(body); }
+  function planCell(x) {
+    var visit = (x.visitNames || []).join(', ') || 'Shepherding visit';
+    var who = [x.byName].concat(x.withNames || []).filter(Boolean).join(' & ');
+    var d = parseDay(x.date);
+    return '<button class="cell" data-action="plan" data-id="' + esc(x.id) + '">' +
+      '<span class="datechip" aria-hidden="true"><small>' + MON[d.getMonth()].slice(0, 3) + '</small><b>' + d.getDate() + '</b></span>' +
+      '<span class="txt"><b>' + esc(visit) + '</b><small>' + esc(DOW[d.getDay()] + (x.time ? ' · ' + fmtTime(x.time) : '') + (who ? ' · ' + who : '')) + '</small></span>' + I.chev + '</button>';
+  }
+  /* The shared calendar at the bottom of Home. */
+  function homeCalendar() {
+    var c = S.homeCal, y = c.y, m = c.m, today = todayStr(), up = plans();
+    var days = {};
+    (S.data.plans || []).forEach(function (x) { days[x.date] = (days[x.date] || 0) + 1; });
+    var startDow = new Date(y, m, 1).getDay(), n = new Date(y, m + 1, 0).getDate();
+    var h = '<div class="cal" style="padding-top:4px"><div class="cal-head"><button class="link" data-action="hcal" data-step="-1" aria-label="Previous month">' + I.left + '</button>' +
+      '<b>' + MON[m] + ' ' + y + '</b><button class="link" data-action="hcal" data-step="1" aria-label="Next month">' + I.right + '</button></div>' +
+      '<div class="cal-grid">' + ['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(function (d) { return '<span class="dow">' + d + '</span>'; }).join('');
+    for (var i = 0; i < startDow; i++) h += '<span></span>';
+    for (var d = 1; d <= n; d++) {
+      var s = y + '-' + pad(m + 1) + '-' + pad(d);
+      h += '<button data-action="plan-day" data-date="' + s + '" class="' + (s === today ? 'today ' : '') + (days[s] ? 'has' : '') + '" aria-label="' + MON[m] + ' ' + d + (days[s] ? ', ' + days[s] + ' planned' : '') + '"' +
+        (s < today ? ' disabled' : '') + '>' + d + '</button>';
+    }
+    h += '</div></div>';
+    return '<div class="glass list" id="home-cal"><div class="card-head"><h2>Upcoming visits</h2><button data-action="plan-new">Add</button></div>' + h +
+      (up.length ? up.slice(0, 8).map(planCell).join('') : '<div class="empty" style="padding:6px 18px 20px"><span>No visits planned yet. Tap a day or Add to put one on the calendar for all the brothers.</span></div>') + '</div>';
+  }
+  function askSheet(opts) {
+    var now = new Date(), d = opts && opts.date ? parseDay(opts.date) : now;
+    return { type: 'ask', withIds: [], visitIds: (opts && opts.visitIds) || [], q: '', date: (opts && opts.date) || '', time: '', future: true,
+      calY: d.getFullYear(), calM: d.getMonth(), text: !(opts && opts.noText), share: true, edited: false };
+  }
+  function sheetAsk() {
+    var sh = S.sheet, bros = brothers().filter(function (b) { return b.id !== S.meId; });
+    var missing = bros.filter(function (b) { return digits(b.phone).length < 10; }).length;
+    var chip = function (b) {
+      var has = digits(b.phone).length >= 10;
+      return '<button class="chip" data-action="ask-with" data-id="' + esc(b.id) + '" aria-pressed="' + (sh.withIds.indexOf(b.id) >= 0) + '"' + (has || !sh.text ? '' : ' disabled title="No phone number yet"') + '>' + esc(b.name) + '</button>';
+    };
+    var el = bros.filter(function (b) { return b.rank === 'Elder'; }), sv = bros.filter(function (b) { return b.rank === 'Ministerial Servant'; });
+    var chosen = sh.visitIds.map(pub).filter(Boolean);
+    var h = head(sh.text ? 'Ask a Brother' : 'Plan a Visit', null, 'Cancel') +
+      '<h2 class="label">Who would you like to go with?</h2><div class="glass">' +
+      (el.length ? '<div class="chips-label">Elders</div><div class="chips">' + el.map(chip).join('') + '</div>' : '') +
+      (sv.length ? '<div class="chips-label">Ministerial servants</div><div class="chips">' + sv.map(chip).join('') + '</div>' : '') + '</div>' +
+      (sh.text && missing ? '<p class="foot" style="text-align:left;margin-top:-8px">Grayed-out names have no phone number yet. Add it on their page with Edit.</p>' : '') +
+      '<h2 class="label">Who are you visiting?</h2><div class="glass list">' +
+      (chosen.length ? '<div class="chips">' + chosen.map(function (p) { return '<button class="chip" data-action="ask-visit" data-id="' + esc(p.id) + '" aria-pressed="true">' + esc(p.name) + ' ✕</button>'; }).join('') + '</div>' : '') +
+      '<label class="search" style="border-radius:0">' + I.search + '<span class="sr">Find a name</span><input id="ask-search" type="search" autocomplete="off" placeholder="Type a name" value="' + esc(sh.q) + '"></label>' +
+      '<div id="ask-results">' + askResults() + '</div></div>' +
+      '<h2 class="label">What day?</h2><div class="glass" id="cal">' + calendar() + '</div>' +
+      '<div class="glass list"><div class="field"><label for="ask-time">Time (optional)</label><input id="ask-time" type="time" value="' + esc(sh.time) + '" style="height:42px;border:none;background:transparent;font-size:17px;color:var(--fg)"></div>' +
+      '<label class="field" for="ask-text"><span>Send a text message</span><input class="switch" id="ask-text" type="checkbox"' + (sh.text ? ' checked' : '') + '></label>' +
+      '<label class="field" for="ask-share"><span>Put on the shared calendar</span><input class="switch" id="ask-share" type="checkbox"' + (sh.share ? ' checked' : '') + '></label></div>';
+    if (sh.text) h += '<h2 class="label"><label for="ask-msg">Message</label></h2><div class="glass"><textarea id="ask-msg" style="min-height:120px">' + esc(sh.edited ? sh.msg : draftText(sh)) + '</textarea></div>';
+    h += '<p class="err" id="ask-err" role="alert" hidden></p>' +
+      '<button class="cta" data-action="ask-send">' + (sh.text ? (sh.share ? 'Send Text & Add to Calendar' : 'Send Text') : 'Add to Calendar') + '</button>';
+    return h;
+  }
+  function askResults() {
+    var q = S.sheet.q.trim().toLowerCase();
+    if (q.length < 2) return '';
+    var list = S.data.publishers.filter(function (p) { return p.rank !== 'Removed' && S.sheet.visitIds.indexOf(p.id) < 0 && p.name.toLowerCase().indexOf(q) >= 0; }).sort(byName).slice(0, 6);
+    return list.map(function (p) {
+      return '<button class="cell" data-action="ask-visit" data-id="' + esc(p.id) + '"><span class="av" aria-hidden="true">' + esc(initials(p.name)) + '</span><span class="txt"><b>' + esc(p.name) + '</b></span>' + I.plus + '</button>';
+    }).join('');
+  }
+  function sheetPlan(x) {
+    var bros = (x.withIds || []).map(pub).filter(Boolean);
+    var nums = bros.map(function (b) { return digits(b.phone); }).filter(function (n) { return n.length >= 10; });
+    var h = head('Planned Visit', null, 'Close') +
+      '<div class="glass list"><div class="row-plain"><span>Day</span><span>' + esc(longDate(x.date)) + (x.time ? ', ' + esc(fmtTime(x.time)) : '') + '</span></div>' +
+      '<div class="row-plain"><span>Visiting</span><span>' + esc((x.visitNames || []).join(', ') || '—') + '</span></div>' +
+      '<div class="row-plain"><span>Planned by</span><span>' + esc(x.byName || '—') + '</span></div>' +
+      '<div class="row-plain"><span>Going with</span><span>' + esc((x.withNames || []).join(', ') || '—') + '</span></div></div>' +
+      ((x.visitIds || []).length ? '<button class="cta" data-action="plan-log" data-id="' + esc(x.id) + '">' + I.plus + 'Log this visit</button>' : '') +
+      (nums.length ? '<button class="quiet glass" data-action="plan-text" data-id="' + esc(x.id) + '">Text ' + esc(joinNames(bros.map(function (b) { return firstName(b.name); }))) + '</button>' : '');
+    h += S.sheet.confirm
+      ? '<div class="glass list"><div class="row-plain"><span>Take this off the calendar?</span></div><button class="action red" data-action="plan-delete" data-id="' + esc(x.id) + '">Remove</button><button class="action" data-action="unconfirm">Keep it</button></div>'
+      : '<button class="quiet red" data-action="confirm">Remove from calendar</button>';
+    return h;
+  }
+  function planById(id) { var l = S.data.plans || []; for (var i = 0; i < l.length; i++) if (l[i].id === id) return l[i]; return null; }
+
   /* ---------------- main views ---------------- */
   function viewHome() {
     var m = me(), cong = (S.data.settings && S.data.settings.congregationName) || 'Northwood Congregation';
@@ -282,7 +397,8 @@
         return '<button class="key glass" data-action="status" data-st="' + k + '"><i style="background:' + STATUS[k].color + '"></i><span>' + STATUS[k].label + '</span><b>' + counts[k] + '</b></button>';
       }).join('') + '</div>' +
       '<button class="cta rise" data-action="log-start">' + I.plus + 'Log a Visit</button>' +
-      '<button class="pill-search glass rise" data-action="find">' + I.search + 'Find someone</button>';
+      '<div class="duo rise"><button class="pill-search glass" data-action="find">' + I.search + 'Find someone</button>' +
+      '<button class="pill-search glass" data-action="ask" style="color:var(--accent);font-weight:600">' + I.chat + 'Ask a brother</button></div>';
     var tiles = ['pioneers', 'appointed', 'publishers', 'inactive'].filter(function (g) { return members(g).length; });
     if (tiles.length) h += '<div class="duo rise">' + tiles.map(tile).join('') + '</div>';
     if (follow.length) {
@@ -379,9 +495,17 @@
       '<div class="stat"><small>Days since visit</small><b style="color:' + (st === 'none' ? 'var(--st-late)' : STATUS[st].color) + '">' +
       (w === null ? '—' : w <= 0 ? 'Today' : w + (w === 1 ? ' day' : ' days')) + '</b></div></div></div>' +
       '<button class="cta rise" data-action="log" data-id="' + esc(p.id) + '">' + I.plus + 'Log a Visit</button>' +
+      (digits(p.phone).length >= 10 ? '<div class="duo"><a class="pill-search glass" href="tel:' + digits(p.phone) + '" style="text-decoration:none;color:var(--accent);font-weight:600;justify-content:center">' + I.phone + 'Call</a>' +
+        '<a class="pill-search glass" href="sms:' + digits(p.phone) + '" style="text-decoration:none;color:var(--accent);font-weight:600;justify-content:center">' + I.chat + 'Text</a></div>' +
+        '<p class="foot" style="margin-top:-8px">' + esc(fmtPhone(p.phone)) + '</p>' : '') +
       (vs.length ? '<div class="glass list"><div class="card-head"><h2>Visits</h2></div>' + vs.map(function (v) { return noteRow(v, false); }).join('') + '</div>'
         : '<div class="glass empty"><span>No visits yet.</span></div>') +
       '<p class="foot">Notes are seen only by the elders.</p></div>';
+  }
+
+  function viewUpcoming() {
+    return '<div class="screen"><div class="top"><h1 class="title">Upcoming</h1><span class="sub">Shepherding visits the brothers have planned</span></div>' +
+      '<button class="cta rise" data-action="ask">' + I.chat + 'Ask a brother</button>' + homeCalendar() + '</div>';
   }
 
   function viewSettings() {
@@ -390,6 +514,7 @@
     var h = '<div class="screen"><div class="top"><h1 class="title">Settings</h1></div>' +
       '<div class="glass list">' +
       (m ? '<div class="cell"><span class="av" aria-hidden="true">' + esc(initials(m.name)) + '</span><span class="txt"><b>' + esc(m.name) + '</b><small>Using Embrace on this phone</small></span></div>' : '') +
+      (m ? '<div class="field"><label for="s-phone">Your phone</label><input id="s-phone" type="text" inputmode="tel" value="' + esc(fmtPhone(m.phone || '')) + '" placeholder="(419) 555-1234"></div>' : '') +
       '<button class="action" data-action="switch">Not you? Choose your name</button></div>' +
       '<h2 class="label">Congregation</h2><div class="glass list">' +
       '<div class="field"><label for="s-cong">Name</label><input id="s-cong" type="text" value="' + esc(cong) + '" placeholder="Congregation name"></div>' +
@@ -458,7 +583,7 @@
   }
 
   function tabs() {
-    return '<div class="tabs"><nav aria-label="Main">' + [['home', 'Home'], ['flock', 'Flock'], ['settings', 'Settings']].map(function (t) {
+    return '<div class="tabs"><nav aria-label="Main">' + [['home', 'Home'], ['flock', 'Flock'], ['upcoming', 'Upcoming'], ['settings', 'Settings']].map(function (t) {
       return '<button data-action="tab" data-tab="' + t[0] + '"' + (S.tab === t[0] ? ' aria-current="page"' : '') + (S.hop === t[0] ? ' class="hop"' : '') + '>' + I[t[0]] + t[1] + '</button>';
     }).join('') + '</nav></div>';
   }
@@ -537,14 +662,16 @@
   function calendar() {
     var sh = S.sheet, y = sh.calY, m = sh.calM, today = todayStr(), now = new Date();
     var startDow = new Date(y, m, 1).getDay(), days = new Date(y, m + 1, 0).getDate();
-    var canNext = y < now.getFullYear() || (y === now.getFullYear() && m < now.getMonth());
-    var h = '<div class="cal"><div class="cal-head"><button class="link" data-action="cal" data-step="-1" aria-label="Previous month">' + I.left + '</button>' +
+    var fut = !!sh.future;
+    var canNext = fut || y < now.getFullYear() || (y === now.getFullYear() && m < now.getMonth());
+    var canPrev = !fut || y > now.getFullYear() || (y === now.getFullYear() && m > now.getMonth());
+    var h = '<div class="cal"><div class="cal-head"><button class="link" data-action="cal" data-step="-1" aria-label="Previous month"' + (canPrev ? '' : ' disabled style="opacity:.25"') + '>' + I.left + '</button>' +
       '<b>' + MON[m] + ' ' + y + '</b><button class="link" data-action="cal" data-step="1" aria-label="Next month"' + (canNext ? '' : ' disabled style="opacity:.25"') + '>' + I.right + '</button></div>' +
       '<div class="cal-grid">' + ['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(function (d) { return '<span class="dow">' + d + '</span>'; }).join('');
     for (var i = 0; i < startDow; i++) h += '<span></span>';
     for (var d = 1; d <= days; d++) {
       var s = y + '-' + pad(m + 1) + '-' + pad(d);
-      h += '<button data-action="day" data-date="' + s + '"' + (s === today ? ' class="today"' : '') + (s > today ? ' disabled' : '') +
+      h += '<button data-action="day" data-date="' + s + '"' + (s === today ? ' class="today"' : '') + ((fut ? s < today : s > today) ? ' disabled' : '') +
         ' aria-pressed="' + (s === sh.date) + '" aria-label="' + MON[m] + ' ' + d + '">' + d + '</button>';
     }
     return h + '</div></div>';
@@ -593,6 +720,7 @@
       }).join('') + '</div>' +
       '<div class="field"><label for="p-group">Group</label><input id="p-group" type="text" list="p-groups" value="' + esc(p.group || '') + '" placeholder="Overseer\'s name"></div>' +
       '<datalist id="p-groups">' + idx.groups.map(function (g) { return '<option value="' + esc(g) + '"></option>'; }).join('') + '</datalist>' +
+      '<div class="field"><label for="p-phone">Phone</label><input id="p-phone" type="text" inputmode="tel" value="' + esc(fmtPhone(p.phone || '')) + '" placeholder="(419) 555-1234" autocomplete="off"></div>' +
       '<div class="field"><label for="p-note">Note</label><input id="p-note" type="text" value="' + esc(p.note || '') + '" placeholder="e.g. Away until April"></div></div>' +
       '<p class="err" id="p-err" role="alert" hidden></p><button class="cta" data-action="save-person">Save</button>';
     if (!isNew) {
@@ -604,7 +732,7 @@
   }
   function sheetImport(sh) {
     var ups = sh.updates || [], vs = sh.visits || [], rm = sh.removes || [];
-    var rows = [['New people', sh.rows.length], ['Privileges updated', ups.length], ['Earlier visits recorded', vs.length], ['Taken off the list', rm.length], ['Already up to date', sh.skipped]];
+    var rows = [['New people', sh.rows.length], ['Details updated', ups.length], ['Earlier visits recorded', vs.length], ['Taken off the list', rm.length], ['Already up to date', sh.skipped]];
     var any = sh.rows.length || ups.length || vs.length || rm.length;
     return head('Import', null, 'Close') + '<div class="glass list">' + rows.map(function (r) {
       return '<div class="row-plain"><span>' + r[0] + '</span><span>' + r[1] + '</span></div>';
@@ -631,7 +759,7 @@
     else {
       var p = S.pubId ? pub(S.pubId) : null;
       if (S.pubId && !p) S.pubId = null;
-      $main.innerHTML = p ? viewPerson(p) : S.tab === 'home' ? viewHome() : S.tab === 'flock' ? viewFlock() : viewSettings();
+      $main.innerHTML = p ? viewPerson(p) : S.tab === 'home' ? viewHome() : S.tab === 'flock' ? viewFlock() : S.tab === 'upcoming' ? viewUpcoming() : viewSettings();
       $tabs.innerHTML = tabs();
       S.hop = null;
       if (!p && S.tab === 'home') drawRing();
@@ -647,6 +775,8 @@
     else if (sh.type === 'visit') { var v = visit(sh.id); if (!v) return closeSheet(); body = sheetVisit(v); }
     else if (sh.type === 'status') body = sheetStatus(sh.st);
     else if (sh.type === 'group') body = sheetGroup(sh.g);
+    else if (sh.type === 'ask') body = sheetAsk();
+    else if (sh.type === 'plan') { var pl = planById(sh.id); if (!pl) return closeSheet(); body = sheetPlan(pl); }
     else if (sh.type === 'visits') body = sheetAllVisits();
     else if (sh.type === 'edit') body = sheetEdit(sh.id ? pub(sh.id) : null);
     else if (sh.type === 'import') body = sheetImport(sh);
@@ -686,6 +816,15 @@
   function logSheet(ids) {
     var now = new Date();
     return { type: 'log', ids: ids.slice(), with: S.meId ? [S.meId] : [], date: todayStr(), calY: now.getFullYear(), calM: now.getMonth() };
+  }
+  function keepAsk() {
+    var sh = S.sheet; if (!sh || sh.type !== 'ask') return;
+    var t = document.getElementById('ask-time'); if (t) sh.time = t.value;
+    var msg = document.getElementById('ask-msg'); if (msg && sh.edited) sh.msg = msg.value;
+  }
+  function refreshMsg() {
+    var sh = S.sheet; if (!sh || sh.type !== 'ask' || sh.edited) return;
+    var msg = document.getElementById('ask-msg'); if (msg) msg.value = draftText(sh);
   }
   function showErr(id, msg) { var el = document.getElementById(id); if (el) { el.textContent = msg; el.hidden = false; } }
   function fail(id) { return function (e) { S.busy = false; showErr(id, window.EmbraceStore.friendly(e)); }; }
@@ -742,7 +881,65 @@
       if (m < 0) { m = 11; y--; } if (m > 11) { m = 0; y++; }
       sh.calM = m; sh.calY = y; document.getElementById('cal').innerHTML = calendar();
     },
-    day: function (el) { S.sheet.date = el.dataset.date; document.getElementById('cal').innerHTML = calendar(); },
+    day: function (el) {
+      S.sheet.date = el.dataset.date; document.getElementById('cal').innerHTML = calendar();
+      if (S.sheet.type === 'ask') refreshMsg();
+    },
+    ask: function () { openSheet(askSheet()); },
+    'plan-new': function () { openSheet(askSheet({ noText: true })); },
+    'plan-day': function (el) { openSheet(askSheet({ noText: true, date: el.dataset.date })); },
+    hcal: function (el) {
+      var c = S.homeCal, m = c.m + (+el.dataset.step), y = c.y;
+      if (m < 0) { m = 11; y--; } if (m > 11) { m = 0; y++; }
+      S.homeCal = { y: y, m: m };
+      var box = document.getElementById('home-cal'); if (box) box.outerHTML = homeCalendar();
+    },
+    'ask-with': function (el) {
+      var w = S.sheet.withIds, id = el.dataset.id, i = w.indexOf(id);
+      if (i >= 0) w.splice(i, 1); else w.push(id);
+      el.setAttribute('aria-pressed', String(i < 0)); refreshMsg();
+    },
+    'ask-visit': function (el) {
+      var v = S.sheet.visitIds, id = el.dataset.id, i = v.indexOf(id);
+      if (i >= 0) v.splice(i, 1); else v.push(id);
+      keepAsk(); S.sheet.q = ''; renderSheet();
+    },
+    'ask-send': function () {
+      var sh = S.sheet; keepAsk();
+      if (!sh.date) return showErr('ask-err', 'Tap a day on the calendar.');
+      var bros = sh.withIds.map(pub).filter(Boolean);
+      var nums = bros.map(function (b) { return digits(b.phone); }).filter(function (n) { return n.length >= 10; });
+      if (sh.text && !nums.length) return showErr('ask-err', 'Tap at least one brother who has a phone number.');
+      if (!sh.text && !sh.share) return showErr('ask-err', 'Turn on the text message or the shared calendar.');
+      var msg = sh.text ? (document.getElementById('ask-msg').value || draftText(sh)) : '';
+      var visit = sh.visitIds.map(pub).filter(Boolean), m = me();
+      var done = function () {
+        closeSheet();
+        if (sh.text) setTimeout(function () { window.location.href = smsLink(nums, msg); }, 250);
+        toast(sh.share ? 'Added to the calendar' : 'Opening your messages');
+      };
+      if (!sh.share) return done();
+      store.addPlan({ date: sh.date, time: sh.time || '', withIds: bros.map(function (b) { return b.id; }), withNames: bros.map(function (b) { return b.name; }),
+        visitIds: visit.map(function (p) { return p.id; }), visitNames: visit.map(function (p) { return p.name; }),
+        by: S.meId || '', byName: m ? m.name : '' }).then(done, fail('ask-err'));
+    },
+    plan: function (el) { openSheet({ type: 'plan', id: el.dataset.id }); },
+    'plan-delete': function (el) { store.deletePlan(el.dataset.id).then(function () { closeSheet(); toast('Removed from the calendar'); }); },
+    'plan-text': function (el) {
+      var x = planById(el.dataset.id); if (!x) return;
+      var bros = (x.withIds || []).map(pub).filter(Boolean);
+      var nums = bros.map(function (b) { return digits(b.phone); }).filter(function (n) { return n.length >= 10; });
+      var body = 'Reminder: shepherding visit' + ((x.visitNames || []).length ? ' with ' + joinNames(x.visitNames) : '') + ' on ' + longDate(x.date) + (x.time ? ' at ' + fmtTime(x.time) : '') + '.';
+      window.location.href = smsLink(nums, body);
+    },
+    'plan-log': function (el) {
+      var x = planById(el.dataset.id); if (!x) return;
+      var ls = logSheet(x.visitIds || []);
+      ls.with = [S.meId].concat(x.withIds || []).filter(function (v, i, a) { return v && a.indexOf(v) === i; });
+      if (x.date <= todayStr()) { ls.date = x.date; var d = parseDay(x.date); ls.calY = d.getFullYear(); ls.calM = d.getMonth(); }
+      ls.fromPlan = x.id;
+      swapSheet(ls);
+    },
     'save-visit': function () {
       var sh = S.sheet, people = sh.ids.map(pub).filter(Boolean);
       if (!people.length || S.busy) return;
@@ -754,7 +951,9 @@
       store.addVisits(people.map(function (p) {
         return { publisherId: p.id, publisherName: p.name, date: sh.date, elders: names, elderIds: sh.with.slice(), notes: notes, followUp: fu, by: S.meId };
       })).then(function () {
-        S.busy = false; closeSheet();
+        S.busy = false;
+        if (sh.fromPlan) store.deletePlan(sh.fromPlan);
+        closeSheet();
         trot(people.length === 1 ? firstName(people[0].name) + '’s visit saved' : people.length + ' visits saved');
       }, fail('v-err'));
     },
@@ -775,7 +974,8 @@
       if (!name) return showErr('p-err', 'Type the person\'s name.');
       var p = { name: name, rank: document.getElementById('p-rank').value, pioneer: document.getElementById('p-pioneer').value,
         roles: S.sheet.roles.slice(), appointedWife: document.getElementById('p-wife').checked,
-        group: document.getElementById('p-group').value.trim(), note: document.getElementById('p-note').value.trim() };
+        group: document.getElementById('p-group').value.trim(), note: document.getElementById('p-note').value.trim(),
+        phone: digits(document.getElementById('p-phone').value) };
       if (S.sheet.id) p.id = S.sheet.id;
       store.savePublisher(p).then(function () { closeSheet(); toast(p.id ? 'Saved' : firstName(name) + ' added'); }, fail('p-err'));
     },
@@ -841,6 +1041,9 @@
     var t = ev.target;
     if (t.id === 'search') { S.query = t.value; var r = document.getElementById('results'); if (r) r.innerHTML = flockList(); }
     if (t.id === 'who-search') { S.whoQuery = t.value; var w = document.getElementById('who-list'); if (w) w.innerHTML = whoResults(); }
+    if (t.id === 'ask-search') { S.sheet.q = t.value; document.getElementById('ask-results').innerHTML = askResults(); }
+    if (t.id === 'ask-msg') { S.sheet.edited = true; S.sheet.msg = t.value; }
+    if (t.id === 'ask-time') { S.sheet.time = t.value; refreshMsg(); }
     if (t.id === 'pick-search') {
       S.sheet.q = t.value;
       document.getElementById('pick-list').innerHTML = pickResults(t.value.trim().toLowerCase(), S.sheet.type === 'pick');
@@ -857,6 +1060,8 @@
     if (t.id === 'group-pick') { S.group = t.value; saveUi(); render(); }
     if (t.id === 's-cong') store.saveSettings({ congregationName: t.value.trim() });
     if (t.id === 's-od') store.saveSettings({ overdueDays: +t.value });
+    if (t.id === 's-phone' && me()) store.savePublisher({ id: S.meId, phone: digits(t.value) }).then(function () { toast('Saved'); });
+    if (t.id === 'ask-text' || t.id === 'ask-share') { keepAsk(); S.sheet[t.id === 'ask-text' ? 'text' : 'share'] = t.checked; renderSheet(); }
     if (t.id === 'import-file' && t.files && t.files[0]) {
       var r = new FileReader();
       r.onload = function () {
@@ -912,7 +1117,7 @@
       if (r.remove) { if (cur && cur.id) removes.push(cur.id); return; }
       if (!cur) {
         id = stampId();
-        var add = { id: id, name: r.name, rank: r.rank, pioneer: r.pioneer, roles: r.roles, appointedWife: r.appointedWife, group: r.group, note: r.note };
+        var add = { id: id, name: r.name, rank: r.rank, pioneer: r.pioneer, roles: r.roles, appointedWife: r.appointedWife, group: r.group, note: r.note, phone: r.phone || '' };
         fresh.push(add); byName[r.name.toLowerCase()] = add;
       } else {
         id = cur.id;
@@ -924,6 +1129,7 @@
         if (r.roles.join('|') !== (cur.roles || []).join('|')) { up.roles = r.roles; changed = true; }
         if (r.appointedWife && !cur.appointedWife) { up.appointedWife = true; changed = true; }
         if (r.group && r.group !== cur.group) { up.group = r.group; changed = true; }
+        if (r.phone && r.phone !== digits(cur.phone)) { up.phone = r.phone; changed = true; }
         if (changed) updates.push(up);
       }
       if (r.lastVisit) {
@@ -956,7 +1162,7 @@
       });
       var lv = get('last_visit');
       out.push({ name: name, rank: rank, pioneer: pioneer, roles: roles, appointedWife: /^(y|yes|true|x|1)$/i.test(get('appointed_wife')),
-        group: get('group'), note: get('note'), lastVisit: /^\d{4}-\d{2}-\d{2}$/.test(lv) ? lv : '' });
+        group: get('group'), note: get('note'), phone: digits(get('phone')), lastVisit: /^\d{4}-\d{2}-\d{2}$/.test(lv) ? lv : '' });
     });
     return out;
   }
@@ -969,11 +1175,11 @@
     if (st.status === 'ready' && !subscribed) {
       subscribed = true;
       store.subscribe(function (d) {
-        S.data = { publishers: d.publishers.map(norm), visits: d.visits, settings: d.settings };
+        S.data = { publishers: d.publishers.map(norm), visits: d.visits, settings: d.settings, plans: d.plans || [] };
         S.loaded = d.ready !== false; rebuild();
         if (S.meId && S.loaded && !pub(S.meId)) { S.meId = null; lsSet('embrace-me', null); }
         render();
-        if (S.sheet && (S.sheet.type === 'visit' || S.sheet.type === 'status' || S.sheet.type === 'group')) renderSheet();
+        if (S.sheet && (S.sheet.type === 'visit' || S.sheet.type === 'status' || S.sheet.type === 'group' || S.sheet.type === 'plan')) renderSheet();
       });
     }
     render();

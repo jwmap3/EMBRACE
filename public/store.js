@@ -8,7 +8,7 @@
 
   var FB = 'https://www.gstatic.com/firebasejs/10.12.2/';
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
-  function blank() { return { publishers: [], visits: [], settings: { overdueDays: 180 } }; }
+  function blank() { return { publishers: [], visits: [], plans: [], settings: { overdueDays: 365 } }; }
 
   /* ---------------- Preview / local store ---------------- */
   function LocalStore(seed) {
@@ -29,7 +29,7 @@
     function save() { try { localStorage.setItem(KEY, JSON.stringify(mem)); } catch (e) { /* blocked: memory only */ } }
     function emit() {
       var d = load();
-      listeners.forEach(function (cb) { cb({ publishers: d.publishers.slice(), visits: d.visits.slice(), settings: d.settings }); });
+      listeners.forEach(function (cb) { cb({ publishers: d.publishers.slice(), visits: d.visits.slice(), plans: (d.plans || []).slice(), settings: d.settings }); });
     }
     function commit() { save(); emit(); return Promise.resolve(); }
 
@@ -64,6 +64,8 @@
         return commit();
       },
       saveSettings: function (s) { var d = load(); d.settings = Object.assign({}, d.settings, s); return commit(); },
+      addPlan: function (x) { var d = load(); d.plans = d.plans || []; d.plans.push(Object.assign({ id: 'plan_' + uid(), createdAt: Date.now() }, x)); return commit(); },
+      deletePlan: function (id) { var d = load(); d.plans = (d.plans || []).filter(function (x) { return x.id !== id; }); return commit(); },
       resetDemo: function () { try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ } mem = null; load(); return commit(); }
     };
   }
@@ -74,7 +76,7 @@
     var listeners = [], unsubs = [], data = blank(), stateCb = null, gotPublishers = false;
 
     function emit() {
-      listeners.forEach(function (cb) { cb({ publishers: data.publishers, visits: data.visits, settings: data.settings, ready: gotPublishers }); });
+      listeners.forEach(function (cb) { cb({ publishers: data.publishers, visits: data.visits, plans: data.plans || [], settings: data.settings, ready: gotPublishers }); });
     }
     function ref(path) { return m.fs.doc.apply(null, [db].concat(path.split('/'))); }
     function col(name) { return m.fs.collection(db, name); }
@@ -89,8 +91,14 @@
       }
       unsubs.push(m.fs.onSnapshot(col('publishers'), into('publishers')));
       unsubs.push(m.fs.onSnapshot(col('visits'), into('visits')));
-      unsubs.push(m.fs.onSnapshot(ref('settings/app'), function (d) {
-        data.settings = Object.assign({ overdueDays: 180 }, d.exists() ? d.data() : {}); emit();
+      // Settings and the shared calendar of planned visits share the "settings" collection.
+      unsubs.push(m.fs.onSnapshot(col('settings'), function (snap) {
+        var st = {}, pl = [];
+        snap.docs.forEach(function (d) {
+          if (d.id === 'app') st = d.data();
+          else if (d.id.indexOf('plan_') === 0) pl.push(Object.assign({ id: d.id }, d.data()));
+        });
+        data.settings = Object.assign({ overdueDays: 365 }, st); data.plans = pl; emit();
       }));
     }
 
@@ -185,7 +193,12 @@
           b.set(m.fs.doc(col('visits')), Object.assign({}, v, { createdAt: m.fs.serverTimestamp() }));
         });
       },
-      saveSettings: function (s) { return m.fs.setDoc(ref('settings/app'), s, { merge: true }); }
+      saveSettings: function (s) { return m.fs.setDoc(ref('settings/app'), s, { merge: true }); },
+      addPlan: function (x) {
+        var id = 'plan_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        return m.fs.setDoc(ref('settings/' + id), Object.assign({ kind: 'plan' }, x, { createdAt: m.fs.serverTimestamp() }));
+      },
+      deletePlan: function (id) { return m.fs.deleteDoc(ref('settings/' + id)); }
     };
   }
 
