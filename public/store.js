@@ -39,6 +39,7 @@
       subscribe: function (cb) { listeners.push(cb); emit(); },
       addVisit: function (v) { load().visits.push(Object.assign({ id: uid(), createdAt: Date.now() }, v)); return commit(); },
       deleteVisit: function (id) { var d = load(); d.visits = d.visits.filter(function (v) { return v.id !== id; }); return commit(); },
+      updateVisit: function (id, ch) { var d = load(); d.visits = d.visits.map(function (v) { return v.id === id ? Object.assign({}, v, ch) : v; }); return commit(); },
       savePublisher: function (p) {
         var d = load(), id = p.id || uid();
         if (p.id) d.publishers = d.publishers.map(function (x) { return x.id === p.id ? Object.assign({}, x, p) : x; });
@@ -165,6 +166,7 @@
       subscribe: function (cb) { listeners.push(cb); emit(); },
       addVisit: function (v) { return m.fs.addDoc(col('visits'), Object.assign({}, v, { createdAt: m.fs.serverTimestamp() })); },
       deleteVisit: function (id) { return m.fs.deleteDoc(ref('visits/' + id)); },
+      updateVisit: function (id, ch) { return m.fs.updateDoc(ref('visits/' + id), ch); },
       savePublisher: function (p) {
         var body = Object.assign({}, p); delete body.id;
         if (p.id) return m.fs.setDoc(ref('publishers/' + p.id), body, { merge: true }).then(function () { return p.id; });

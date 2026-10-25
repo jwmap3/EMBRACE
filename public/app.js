@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '4.1';
+  var VERSION = '4.3';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -645,17 +645,17 @@
       : '<h2 class="label">Visiting ' + people.length + ' people</h2><div class="glass"><div class="chips">' + people.map(function (p) {
           return '<span class="chip" aria-pressed="true" style="display:inline-flex;align-items:center">' + esc(p.name) + '</span>';
         }).join('') + '</div></div>';
-    if (extraList.length) {
+    if (extraList.length && !sh.editId) {
       top += '<button class="quiet glass" data-action="add-family">Add the rest of the family: ' + esc(extraList.map(function (x) { return firstName(x.name); }).join(', ')) + '</button>';
     }
-    return head('Log a Visit', '<button class="link" data-action="save-visit">Save</button>') + top +
+    return head(sh.editId ? 'Edit Visit' : 'Log a Visit', '<button class="link" data-action="save-visit">Save</button>') + top +
       '<h2 class="label">Who went with you?</h2><div class="glass">' +
       '<div class="chips-label">Elders</div><div class="chips" role="group" aria-label="Elders on this visit">' + els.map(chip).join('') + '</div>' +
       (servants.length ? '<div class="chips-label">Ministerial servants</div><div class="chips" role="group" aria-label="Ministerial servants on this visit">' + servants.map(chip).join('') + '</div>' : '') +
       '</div>' +
       '<h2 class="label">What day?</h2><div class="glass" id="cal">' + calendar() + '</div>' +
-      '<h2 class="label"><label for="v-notes">Notes</label></h2><div class="glass list"><textarea id="v-notes" placeholder="What was shared, how they are doing, anything to follow up on"></textarea>' +
-      '<label class="field" for="v-fu"><span>Needs a follow-up</span><input class="switch" id="v-fu" type="checkbox"></label></div>' +
+      '<h2 class="label"><label for="v-notes">Notes</label></h2><div class="glass list"><textarea id="v-notes" placeholder="What was shared, how they are doing, anything to follow up on">' + esc(sh.notes || '') + '</textarea>' +
+      '<label class="field" for="v-fu"><span>Needs a follow-up</span><input class="switch" id="v-fu" type="checkbox"' + (sh.followUp ? ' checked' : '') + '></label></div>' +
       '<p class="err" id="v-err" role="alert" hidden></p>' +
       '<button class="cta" data-action="save-visit">Save Visit</button>';
   }
@@ -676,6 +676,8 @@
     }
     return h + '</div></div>';
   }
+  // Only the brothers who went on a visit (or whoever recorded it) can change it.
+  function canChange(v) { return !!S.meId && ((v.elderIds || []).indexOf(S.meId) >= 0 || v.by === S.meId); }
   function sheetVisit(v) {
     var p = pub(v.publisherId);
     var h = head('Visit', null, 'Close') +
@@ -686,9 +688,13 @@
       '<h2 class="label">Notes</h2><div class="glass" style="padding:16px 18px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5">' +
       (v.notes ? esc(v.notes) : '<span style="color:var(--fg2)">No notes.</span>') + '</div>';
     if (p && S.pubId !== p.id) h += '<button class="quiet glass" data-action="open" data-id="' + esc(p.id) + '">Open ' + esc(firstName(p.name)) + '\'s page</button>';
-    h += S.sheet.confirm
+    if (canChange(v)) {
+      h += S.sheet.confirm
       ? '<div class="glass list"><div class="row-plain"><span>Delete this visit?</span></div><button class="action red" data-action="delete-visit" data-id="' + esc(v.id) + '">Delete</button><button class="action" data-action="unconfirm">Keep it</button></div>'
-      : '<button class="quiet red" data-action="confirm">Delete visit</button>';
+      : '<button class="quiet glass" data-action="edit-visit" data-id="' + esc(v.id) + '">Edit visit</button><button class="quiet red" data-action="confirm">Delete visit</button>';
+    } else {
+      h += '<p class="foot">Only the brothers who went on this visit can edit or delete it.</p>';
+    }
     return h;
   }
   function sheetStatus(st) {
@@ -943,11 +949,16 @@
     'save-visit': function () {
       var sh = S.sheet, people = sh.ids.map(pub).filter(Boolean);
       if (!people.length || S.busy) return;
-      if (!sh.with.length) return showErr('v-err', 'Tap at least one name under "Who went with you?"');
+      if (!sh.with.length && !sh.editId) return showErr('v-err', 'Tap at least one name under "Who went with you?"');
       if (sh.date > todayStr()) return showErr('v-err', 'Pick a day that has already happened.');
       var names = sh.with.map(function (id) { var e = pub(id); return e ? e.name : ''; }).filter(Boolean);
       S.busy = true;
       var notes = document.getElementById('v-notes').value.trim(), fu = document.getElementById('v-fu').checked;
+      if (sh.editId) {
+        return store.updateVisit(sh.editId, { date: sh.date, elders: names, elderIds: sh.with.slice(), notes: notes, followUp: fu }).then(function () {
+          S.busy = false; closeSheet(); toast('Visit updated');
+        }, fail('v-err'));
+      }
       store.addVisits(people.map(function (p) {
         return { publisherId: p.id, publisherName: p.name, date: sh.date, elders: names, elderIds: sh.with.slice(), notes: notes, followUp: fu, by: S.meId };
       })).then(function () {
@@ -958,7 +969,14 @@
       }, fail('v-err'));
     },
     visit: function (el) { openSheet({ type: 'visit', id: el.dataset.id }); },
-    'delete-visit': function (el) { store.deleteVisit(el.dataset.id).then(function () { closeSheet(); toast('Visit deleted'); }); },
+    'edit-visit': function (el) {
+      var v = visit(el.dataset.id); if (!v || !canChange(v)) return;
+      var ls = logSheet([v.publisherId]), d = parseDay(v.date);
+      ls.editId = v.id; ls.with = (v.elderIds || []).slice(); ls.date = v.date; ls.calY = d.getFullYear(); ls.calM = d.getMonth();
+      ls.notes = v.notes || ''; ls.followUp = !!v.followUp;
+      swapSheet(ls);
+    },
+    'delete-visit': function (el) { var v = visit(el.dataset.id); if (!v || !canChange(v)) return; store.deleteVisit(el.dataset.id).then(function () { closeSheet(); toast('Visit deleted'); }); },
     edit: function (el) { var p = pub(el.dataset.id); openSheet({ type: 'edit', id: el.dataset.id, roles: ((p && p.roles) || []).slice() }); },
     new: function () { openSheet({ type: 'edit', id: null, roles: [] }); },
     role: function (el) {
