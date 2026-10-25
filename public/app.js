@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '3.2';
+  var VERSION = '3.3';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -219,13 +219,40 @@
     });
   }
 
+  /* The two priority groups, each a tappable tile on Home. */
+  var GROUPS = {
+    pioneers: { title: 'Pioneers', sub: 'Regular and special pioneers',
+      test: function (p) { return isActive(p) && (p.pioneer === 'Regular Pioneer' || p.pioneer === 'Special Pioneer'); },
+      parts: [['Regular pioneers', function (p) { return p.pioneer === 'Regular Pioneer'; }], ['Special pioneers', function (p) { return p.pioneer === 'Special Pioneer'; }]] },
+    appointed: { title: 'Appointed', sub: 'Elders, servants and their wives',
+      test: function (p) { return isActive(p) && (p.rank === 'Elder' || p.rank === 'Ministerial Servant' || !!p.appointedWife); },
+      parts: [['Elders', function (p) { return p.rank === 'Elder'; }], ['Ministerial servants', function (p) { return p.rank === 'Ministerial Servant'; }],
+        ['Appointed wives', function (p) { return p.appointedWife && p.rank !== 'Elder' && p.rank !== 'Ministerial Servant'; }]] }
+  };
+  function members(g) { return flock().filter(GROUPS[g].test); }
+  function seenCount(list) { return list.filter(function (p) { var s = state(p); return s === 'fresh' || s === 'soon'; }).length; }
+  function tile(g) {
+    var list = members(g), done = seenCount(list), pct = Math.round(done / list.length * 100);
+    return '<button class="glass tile" data-action="group-sheet" data-g="' + g + '"><span class="tile-label">' + GROUPS[g].title + I.chev + '</span>' +
+      '<b>' + done + '<small> of ' + list.length + '</small></b><span class="bar"><i style="width:' + pct + '%"></i></span>' +
+      '<span class="tile-sub">visited</span></button>';
+  }
+  function sheetGroup(g) {
+    var G = GROUPS[g], list = members(g), done = seenCount(list), h = '';
+    G.parts.forEach(function (part) {
+      var ppl = needOrder(list.filter(part[1]));
+      if (ppl.length) h += '<h2 class="label">' + part[0] + ' · ' + seenCount(ppl) + ' of ' + ppl.length + '</h2><div class="glass list">' + ppl.map(function (p) { return cell(p); }).join('') + '</div>';
+    });
+    return head(G.title, null, 'Close') +
+      '<p class="sub" style="margin-top:-6px">' + done + ' of ' + list.length + ' visited in the last ' + odText() + '</p>' + h;
+  }
+
   /* ---------------- main views ---------------- */
   function viewHome() {
     var m = me(), cong = (S.data.settings && S.data.settings.congregationName) || 'Northwood Congregation';
     var all = flock(), counts = { fresh: 0, soon: 0, late: 0, none: 0 };
     all.forEach(function (p) { counts[state(p)]++; });
     var seen = counts.fresh + counts.soon;
-    var pri = all.filter(isPriority), priDone = pri.filter(function (p) { var s = state(p); return s === 'fresh' || s === 'soon'; }).length;
     var next = needOrder(all.filter(function (p) { return state(p) !== 'fresh'; })).slice(0, 3);
     var follow = S.data.publishers.filter(function (p) { var l = last(p); return l && l.followUp; }).sort(byNeed);
     var recent = S.data.visits.slice().sort(visitOrder).slice(0, 3);
@@ -247,10 +274,8 @@
       }).join('') + '</div>' +
       '<button class="cta rise" data-action="log-start">' + I.plus + 'Log a Visit</button>' +
       '<button class="pill-search glass rise" data-action="find">' + I.search + 'Find someone</button>';
-    if (pri.length) {
-      h += '<div class="glass pri"><div class="row"><b>Pioneers &amp; appointed</b><span>' + priDone + ' of ' + pri.length + '</span></div>' +
-        '<div class="bar"><i style="width:' + Math.round(priDone / pri.length * 100) + '%"></i></div></div>';
-    }
+    var tiles = ['pioneers', 'appointed'].filter(function (g) { return members(g).length; });
+    if (tiles.length) h += '<div class="duo rise">' + tiles.map(tile).join('') + '</div>';
     if (follow.length) {
       h += '<div class="glass list"><div class="card-head"><h2>Needs a follow-up</h2></div>' + follow.slice(0, 5).map(function (p) { return cell(p); }).join('') + '</div>';
     }
@@ -537,6 +562,7 @@
     else if (sh.type === 'log') { var p = pub(sh.id); if (!p) return closeSheet(); body = sheetLog(p); }
     else if (sh.type === 'visit') { var v = visit(sh.id); if (!v) return closeSheet(); body = sheetVisit(v); }
     else if (sh.type === 'status') body = sheetStatus(sh.st);
+    else if (sh.type === 'group') body = sheetGroup(sh.g);
     else if (sh.type === 'visits') body = sheetAllVisits();
     else if (sh.type === 'edit') body = sheetEdit(sh.id ? pub(sh.id) : null);
     else if (sh.type === 'import') body = sheetImport(sh);
@@ -596,6 +622,7 @@
     'log-start': function () { openSheet({ type: 'pick', q: '' }); focusLater('pick-search'); },
     find: function () { openSheet({ type: 'find', q: '' }); focusLater('pick-search'); },
     status: function (el) { openSheet({ type: 'status', st: el.dataset.st }); },
+    'group-sheet': function (el) { openSheet({ type: 'group', g: el.dataset.g }); },
     'all-visits': function () { openSheet({ type: 'visits' }); },
     pick: function (el) { swapSheet(logSheet(el.dataset.id)); },
     log: function (el) { openSheet(logSheet(el.dataset.id)); },
@@ -837,7 +864,7 @@
         S.loaded = d.ready !== false; rebuild();
         if (S.meId && S.loaded && !pub(S.meId)) { S.meId = null; lsSet('embrace-me', null); }
         render();
-        if (S.sheet && (S.sheet.type === 'visit' || S.sheet.type === 'status')) renderSheet();
+        if (S.sheet && (S.sheet.type === 'visit' || S.sheet.type === 'status' || S.sheet.type === 'group')) renderSheet();
       });
     }
     render();
