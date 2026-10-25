@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '3.8';
+  var VERSION = '3.9';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -227,9 +227,16 @@
     appointed: { title: 'Appointed', sub: 'Elders, servants and their wives',
       test: function (p) { return isActive(p) && (p.rank === 'Elder' || p.rank === 'Ministerial Servant' || !!p.appointedWife); },
       parts: [['Elders', function (p) { return p.rank === 'Elder'; }], ['Ministerial servants', function (p) { return p.rank === 'Ministerial Servant'; }],
-        ['Appointed wives', function (p) { return p.appointedWife && p.rank !== 'Elder' && p.rank !== 'Ministerial Servant'; }]] }
+        ['Appointed wives', function (p) { return p.appointedWife && p.rank !== 'Elder' && p.rank !== 'Ministerial Servant'; }]] },
+    publishers: { title: 'Publishers', sub: 'Everyone else who is active',
+      test: function (p) { return isActive(p) && !GROUPS.pioneers.test(p) && !GROUPS.appointed.test(p); },
+      parts: [['Auxiliary pioneers', function (p) { return p.pioneer === 'Auxiliary Pioneer'; }],
+        ['Publishers', function (p) { return p.pioneer !== 'Auxiliary Pioneer'; }]] },
+    inactive: { title: 'Inactive & removed', sub: 'Inactive and removed ones', all: true,
+      test: function (p) { return p.rank === 'Inactive' || p.rank === 'Removed'; },
+      parts: [['Inactive', function (p) { return p.rank === 'Inactive'; }], ['Removed', function (p) { return p.rank === 'Removed'; }]] }
   };
-  function members(g) { return flock().filter(GROUPS[g].test); }
+  function members(g) { return (GROUPS[g].all ? S.data.publishers : flock()).filter(GROUPS[g].test); }
   function seenCount(list) { return list.filter(function (p) { var s = state(p); return s === 'fresh' || s === 'soon'; }).length; }
   function tile(g) {
     var list = members(g), done = seenCount(list), pct = Math.round(done / list.length * 100);
@@ -274,7 +281,7 @@
       }).join('') + '</div>' +
       '<button class="cta rise" data-action="log-start">' + I.plus + 'Log a Visit</button>' +
       '<button class="pill-search glass rise" data-action="find">' + I.search + 'Find someone</button>';
-    var tiles = ['pioneers', 'appointed'].filter(function (g) { return members(g).length; });
+    var tiles = ['pioneers', 'appointed', 'publishers', 'inactive'].filter(function (g) { return members(g).length; });
     if (tiles.length) h += '<div class="duo rise">' + tiles.map(tile).join('') + '</div>';
     if (follow.length) {
       h += '<div class="glass list"><div class="card-head"><h2>Needs a follow-up</h2></div>' + follow.slice(0, 5).map(function (p) { return cell(p); }).join('') + '</div>';
