@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '3.6';
+  var VERSION = '3.7';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -377,6 +377,7 @@
 
   function viewSettings() {
     var m = me(), cong = (S.data.settings && S.data.settings.congregationName) || 'Northwood Congregation', els = elders();
+    var svs = S.data.publishers.filter(function (p) { return p.rank === 'Ministerial Servant'; }).sort(byName);
     var h = '<div class="screen"><div class="top"><h1 class="title">Settings</h1></div>' +
       '<div class="glass list">' +
       (m ? '<div class="cell"><span class="av" aria-hidden="true">' + esc(initials(m.name)) + '</span><span class="txt"><b>' + esc(m.name) + '</b><small>Using Embrace on this phone</small></span></div>' : '') +
@@ -386,9 +387,12 @@
       '<div class="field"><label for="s-od">Overdue after</label><select id="s-od">' + [[90, '3 months'], [120, '4 months'], [180, '6 months'], [365, '1 year']].map(function (o) {
         return '<option value="' + o[0] + '"' + (od() === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
       }).join('') + '</select></div></div>' +
-      '<h2 class="label">Elders</h2>' +
-      (els.length ? '<div class="glass list">' + els.map(function (p) { return cell(p); }).join('') + '</div>' : '') +
-      '<p class="foot" style="text-align:left;margin-top:-8px">Anyone marked Elder can pick his name the first time he opens Embrace.</p>' +
+      '<h2 class="label">Elders · ' + els.length + '</h2><div class="glass list">' + els.map(function (p) { return cell(p); }).join('') +
+      '<button class="action" data-action="assign" data-rank="Elder">Mark someone as an elder</button></div>' +
+      '<p class="foot" style="text-align:left;margin-top:-8px">Elders can pick their name the first time they open Embrace.</p>' +
+      '<h2 class="label">Ministerial servants · ' + svs.length + '</h2><div class="glass list">' + svs.map(function (p) { return cell(p); }).join('') +
+      '<button class="action" data-action="assign" data-rank="Ministerial Servant">Mark someone as a servant</button></div>' +
+      '<p class="foot" style="text-align:left;margin-top:-8px">Elders and servants can be picked under "Who went with you?"</p>' +
       '<h2 class="label">Publishers</h2><div class="glass list">' +
       '<button class="action" data-action="new">Add a person</button>' +
       '<button class="action" data-action="import-pick">Import a list (CSV)</button>' +
@@ -456,6 +460,12 @@
       '<h2 id="sheet-title">' + esc(title) + '</h2>' + (right || '<span></span>') + '</div>';
   }
   function pickResults(q, forLog) {
+    if (S.sheet && S.sheet.type === 'assign') {
+      var r = S.sheet.rank;
+      var cand = S.data.publishers.filter(function (p) { return p.rank !== r && p.rank !== 'Removed' && (!q || p.name.toLowerCase().indexOf(q) >= 0); }).sort(byName).slice(0, q ? 40 : 0);
+      if (!q) return '<p class="foot">Type a name to find him.</p>';
+      return cand.length ? '<div class="glass list">' + cand.map(function (p) { return cell(p, 'make', true); }).join('') + '</div>' : '<div class="glass empty"><span>No name matches.</span></div>';
+    }
     var list = needOrder(S.data.publishers.filter(function (p) { return (p.rank !== 'Removed' || q) && (!q || p.name.toLowerCase().indexOf(q) >= 0); })).slice(0, q ? 40 : 6);
     if (!list.length) return '<div class="glass empty"><span>No name matches.</span></div>';
     return (q ? '' : '<h2 class="label" style="margin-bottom:8px">Waiting the longest</h2>') +
@@ -463,7 +473,8 @@
   }
   function sheetPick(forLog) {
     var q = (S.sheet.q || '').trim().toLowerCase();
-    return head(forLog ? 'Who did you visit?' : 'Find someone', null, 'Close') +
+    var title = S.sheet.type === 'assign' ? (S.sheet.rank === 'Elder' ? 'Add an Elder' : 'Add a Servant') : forLog ? 'Who did you visit?' : 'Find someone';
+    return head(title, null, 'Close') +
       '<label class="search glass">' + I.search + '<span class="sr">Find a name</span><input id="pick-search" type="search" autocomplete="off" placeholder="Type a name" value="' + esc(S.sheet.q || '') + '"></label>' +
       '<div id="pick-list">' + pickResults(q, forLog) + '</div>';
   }
@@ -595,7 +606,7 @@
     var sh = S.sheet, body = '';
     if (!sh) { $sheet.innerHTML = ''; document.body.style.overflow = ''; return; }
     if (sh.type === 'pick') body = sheetPick(true);
-    else if (sh.type === 'find') body = sheetPick(false);
+    else if (sh.type === 'find' || sh.type === 'assign') body = sheetPick(false);
     else if (sh.type === 'log') { var p = pub(sh.id); if (!p) return closeSheet(); body = sheetLog(p); }
     else if (sh.type === 'visit') { var v = visit(sh.id); if (!v) return closeSheet(); body = sheetVisit(v); }
     else if (sh.type === 'status') body = sheetStatus(sh.st);
@@ -666,6 +677,11 @@
     'group-sheet': function (el) { openSheet({ type: 'group', g: el.dataset.g }); },
     'all-visits': function () { openSheet({ type: 'visits' }); },
     pick: function (el) { swapSheet(logSheet(el.dataset.id)); },
+    assign: function (el) { openSheet({ type: 'assign', rank: el.dataset.rank, q: '' }); focusLater('pick-search'); },
+    make: function (el) {
+      var p = pub(el.dataset.id), r = S.sheet.rank;
+      store.savePublisher({ id: p.id, rank: r }).then(function () { closeSheet(); toast(firstName(p.name) + ' is now ' + (r === 'Elder' ? 'an elder' : 'a servant')); });
+    },
     log: function (el) { openSheet(logSheet(el.dataset.id)); },
     with: function (el) {
       var w = S.sheet.with, id = el.dataset.id, i = w.indexOf(id);
