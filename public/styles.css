@@ -192,11 +192,22 @@ button.cell:active { background: var(--fill); }
 .search { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 18px; border-radius: 18px; color: var(--fg2); }
 .search input { flex: 1; min-width: 0; border: none; background: transparent; font-size: 18px; outline: none; color: var(--fg); }
 .search input::placeholder { color: var(--fg2); }
-.filters { display: flex; gap: 10px; align-items: center; }
+.filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.filters .seg { flex: 1 1 100%; }
+.filters .pick { flex: 1 1 100%; max-width: none; }
 .seg { flex: 1; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); padding: 4px; border-radius: 16px; }
 .seg button { height: 40px; border: none; border-radius: 12px; background: transparent; font-size: 15.5px; font-weight: 550; white-space: nowrap; padding: 0 6px; color: var(--fg2); }
 .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 650; }
 .pick { flex: 0 1 auto; max-width: 38%; min-width: 0; height: 48px; border-radius: 16px; padding: 0 12px; font-size: 15.5px; font-weight: 600; color: var(--accent); }
+
+/* Folded sections (Groups, Families) */
+.fold-head { min-height: 72px; }
+.fold-head .txt b { font-family: var(--display); font-size: 20px; }
+.fold-bar { width: 56px; height: 6px; border-radius: 3px; background: var(--fill); overflow: hidden; flex-shrink: 0; }
+.fold-bar i { display: block; height: 100%; background: var(--st-fresh); border-radius: 3px; }
+.fold-chev { color: var(--fg2); flex-shrink: 0; transition: transform .25s; }
+.fold.open .fold-chev { transform: rotate(180deg); }
+.fold.open .fold-head { background: var(--fill); }
 
 /* ---------- Person ---------- */
 .nav { display: flex; justify-content: space-between; align-items: center; margin: -10px -10px 0; }

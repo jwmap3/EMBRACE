@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '3.3';
+  var VERSION = '3.5';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -29,7 +29,7 @@
     status: 'loading', error: '', loaded: false,
     data: { publishers: [], visits: [], settings: { overdueDays: 180 } },
     tab: 'home', mode: 'priority', group: 'all', query: '',
-    pubId: null, sheet: null, hop: null, scroll: {},
+    pubId: null, sheet: null, hop: null, scroll: {}, open: {},
     meId: null, whoAll: false, whoQuery: '', busy: false, ringDrawn: false
   };
   var idx = { byPub: {}, groups: [] };
@@ -301,14 +301,46 @@
       h += block('Publishers', list.filter(function (p) { return isActive(p) && !isPriority(p); }).sort(byNeed));
       h += block('Inactive', list.filter(function (p) { return p.rank === 'Inactive'; }).sort(byNeed));
       h += block('Removed', list.filter(function (p) { return p.rank === 'Removed'; }).sort(byNeed));
+    } else if (S.mode === 'families') {
+      h += familyBlocks(list);
     } else {
       var g = {};
       list.forEach(function (p) { (g[p.group || 'No group'] = g[p.group || 'No group'] || []).push(p); });
       Object.keys(g).sort(function (a, b) { return a === 'No group' ? 1 : b === 'No group' ? -1 : a.localeCompare(b); })
-        .forEach(function (k) { h += block(k === 'No group' ? k : k + ' group', g[k].sort(byName)); });
+        .forEach(function (k) { h += fold('grp:' + k, k === 'No group' ? k : k + ' group', g[k].sort(byNeed)); });
     }
     return h;
   }
+  /* A folded section: shows its name and visited count; tap to open. */
+  function fold(key, title, ppl) {
+    var open = !!S.open[key], done = seenCount(ppl);
+    return '<div class="glass list fold' + (open ? ' open' : '') + '"><button class="cell fold-head" data-action="fold" data-key="' + esc(key) + '" aria-expanded="' + open + '">' +
+      '<span class="txt"><b>' + esc(title) + '</b><small>' + done + ' of ' + ppl.length + ' visited</small></span>' +
+      '<span class="fold-bar" aria-hidden="true"><i style="width:' + Math.round(done / ppl.length * 100) + '%"></i></span>' +
+      '<svg class="fold-chev" width="14" height="9" viewBox="0 0 14 9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 1.5l6 6 6-6"/></svg></button>' +
+      (open ? ppl.map(function (p) { return cell(p); }).join('') : '') + '</div>';
+  }
+
+  /* Families: people who share a last name in the same field service group. */
+  function familyBlocks(list) {
+    var fam = {};
+    list.forEach(function (p) {
+      var key = lastName(p.name) + '|' + (p.group || '');
+      (fam[key] = fam[key] || []).push(p);
+    });
+    var keys = Object.keys(fam), many = keys.filter(function (k) { return fam[k].length > 1; }), ones = [];
+    keys.forEach(function (k) { if (fam[k].length === 1) ones.push(fam[k][0]); });
+    many.sort(function (a, b) { return a.localeCompare(b); });
+    var h = many.map(function (k) {
+      var ppl = fam[k].slice().sort(function (a, b) { return byNeed(a, b); });
+      var surname = words(ppl[0].name).slice(-1)[0] || ppl[0].name;
+      var grp = ppl[0].group ? ' · ' + ppl[0].group + ' group' : '';
+      return fold('fam:' + k, surname + ' family' + grp, ppl);
+    }).join('');
+    if (ones.length) h += fold('fam:individuals', 'Individuals', ones.sort(byName));
+    return h;
+  }
+
   function viewFlock() {
     var opts = '<option value="all">All groups</option>' + idx.groups.map(function (g) {
       return '<option value="' + esc(g) + '"' + (S.group === g ? ' selected' : '') + '>' + esc(g) + '</option>';
@@ -317,7 +349,8 @@
       '<label class="search glass">' + I.search + '<span class="sr">Find a name</span><input id="search" type="search" autocomplete="off" placeholder="Find a name" value="' + esc(S.query) + '"></label>' +
       '<div class="filters"><div class="seg glass" role="group" aria-label="Sort">' +
       '<button data-action="mode" data-mode="priority" aria-pressed="' + (S.mode === 'priority') + '">Who\'s next</button>' +
-      '<button data-action="mode" data-mode="everyone" aria-pressed="' + (S.mode === 'everyone') + '">By group</button></div>' +
+      '<button data-action="mode" data-mode="everyone" aria-pressed="' + (S.mode === 'everyone') + '">Groups</button>' +
+      '<button data-action="mode" data-mode="families" aria-pressed="' + (S.mode === 'families') + '">Families</button></div>' +
       (idx.groups.length ? '<select class="pick glass" id="group-pick" aria-label="Field service group">' + opts + '</select>' : '') + '</div>' +
       '<div id="results" style="display:flex;flex-direction:column;gap:18px">' + flockList() + '</div></div>';
   }
@@ -617,6 +650,10 @@
       render(); window.scrollTo(0, 0);
     },
     mode: function (el) { S.mode = el.dataset.mode; saveUi(); render(); },
+    fold: function (el) {
+      var k = el.dataset.key; S.open[k] = !S.open[k];
+      var r = document.getElementById('results'); if (r) r.innerHTML = flockList();
+    },
     open: function (el) { openPerson(el.dataset.id); },
     back: function () { pop(function () { S.pubId = null; render(); window.scrollTo(0, S.scroll[S.tab] || 0); }); },
     'log-start': function () { openSheet({ type: 'pick', q: '' }); focusLater('pick-search'); },
