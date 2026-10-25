@@ -1,6 +1,6 @@
 // Keeps Embrace opening quickly and working with weak signal.
 // The app files are cached; visit data syncs through Firebase's own offline cache.
-var CACHE = 'embrace-v16';
+var CACHE = 'embrace-v17';
 var FILES = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png'];
 
 self.addEventListener('install', function (e) {

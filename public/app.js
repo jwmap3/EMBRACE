@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '3.10';
+  var VERSION = '3.11';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -232,7 +232,7 @@
       test: function (p) { return isActive(p) && !GROUPS.pioneers.test(p) && !GROUPS.appointed.test(p); },
       parts: [['Auxiliary pioneers', function (p) { return p.pioneer === 'Auxiliary Pioneer'; }],
         ['Publishers', function (p) { return p.pioneer !== 'Auxiliary Pioneer'; }]] },
-    inactive: { title: 'Inactive & removed', sub: 'Inactive and removed ones', all: true,
+    inactive: { title: 'Inactive', sub: 'Inactive and removed ones', all: true,
       test: function (p) { return p.rank === 'Inactive' || p.rank === 'Removed'; },
       parts: [['Inactive', function (p) { return p.rank === 'Inactive'; }], ['Removed', function (p) { return p.rank === 'Removed'; }]] }
   };
