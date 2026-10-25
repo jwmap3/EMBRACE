@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '3.11';
+  var VERSION = '3.12';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -18,10 +18,11 @@
   var STATUS = {
     fresh: { label: 'Visited', long: 'Visited recently', color: 'var(--st-fresh)' },
     soon: { label: 'Due soon', long: 'Due for a visit soon', color: 'var(--st-soon)' },
-    late: { label: 'Overdue', long: 'Overdue for a visit', color: 'var(--st-late)' },
-    none: { label: 'Not yet', long: 'Not visited yet', color: 'var(--st-none)' }
+    late: { label: 'Waiting', long: 'Waiting for a visit', color: 'var(--st-late)' },
+    none: { label: 'Not yet', long: 'Not yet visited', color: 'var(--st-none)' }
   };
-  var ORDER = ['fresh', 'soon', 'late', 'none'];
+  var ORDER = ['fresh', 'soon', 'none'];
+  function homeState(p) { var s = state(p); return s === 'late' ? 'none' : s; }
   var PREVIEW = !!window.EMBRACE_PREVIEW;
   var store = window.EmbraceStore.create();
 
@@ -258,7 +259,7 @@
   function viewHome() {
     var m = me(), cong = (S.data.settings && S.data.settings.congregationName) || 'Northwood Congregation';
     var all = flock(), counts = { fresh: 0, soon: 0, late: 0, none: 0 };
-    all.forEach(function (p) { counts[state(p)]++; });
+    all.forEach(function (p) { counts[homeState(p)]++; });
     var seen = counts.fresh + counts.soon;
     var next = needOrder(all.filter(function (p) { return state(p) !== 'fresh'; })).slice(0, 3);
     var follow = S.data.publishers.filter(function (p) { var l = last(p); return l && l.followUp; }).sort(byNeed);
@@ -391,7 +392,7 @@
       '<button class="action" data-action="switch">Not you? Choose your name</button></div>' +
       '<h2 class="label">Congregation</h2><div class="glass list">' +
       '<div class="field"><label for="s-cong">Name</label><input id="s-cong" type="text" value="' + esc(cong) + '" placeholder="Congregation name"></div>' +
-      '<div class="field"><label for="s-od">Overdue after</label><select id="s-od">' + [[90, '3 months'], [120, '4 months'], [180, '6 months'], [365, '1 year']].map(function (o) {
+      '<div class="field"><label for="s-od">Visit every</label><select id="s-od">' + [[90, '3 months'], [120, '4 months'], [180, '6 months'], [365, '1 year']].map(function (o) {
         return '<option value="' + o[0] + '"' + (od() === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
       }).join('') + '</select></div></div>' +
       '<h2 class="label">Elders · ' + els.length + '</h2><div class="glass list">' + els.map(function (p) { return cell(p); }).join('') +
@@ -563,7 +564,7 @@
     return h;
   }
   function sheetStatus(st) {
-    var list = needOrder(flock().filter(function (p) { return state(p) === st; }));
+    var list = needOrder(flock().filter(function (p) { return homeState(p) === st; }));
     return head(STATUS[st].long, null, 'Close') +
       '<p class="sub" style="margin-top:-6px">' + list.length + (list.length === 1 ? ' person' : ' people') + '</p>' +
       (list.length ? '<div class="glass list">' + list.map(function (p) { return cell(p); }).join('') + '</div>' : '<div class="glass empty"><span>No one here right now.</span></div>');
