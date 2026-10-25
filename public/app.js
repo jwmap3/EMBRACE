@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '4.5';
+  var VERSION = '4.6';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -1198,6 +1198,36 @@
   }
   window.EmbraceParseRoster = parseRoster;
 
+  /* ---------------- phone numbers from a shared link ----------------
+     A link ending in #phones=... carries "name:number" pairs (never stored in the code).
+     Once this phone is unlocked and the list has loaded, matching people get their numbers. */
+  var pendingPhones = null;
+  (function () {
+    var h = location.hash || '';
+    if (h.indexOf('#phones=') !== 0) return;
+    try {
+      var raw = decodeURIComponent(h.slice(8)), out = {};
+      raw.split(';').forEach(function (pair) { var i = pair.lastIndexOf(':'); if (i > 0) out[pair.slice(0, i).trim().toLowerCase()] = digits(pair.slice(i + 1)); });
+      pendingPhones = out;
+      lsSet('embrace-phones', JSON.stringify(out));
+    } catch (e) { /* bad link */ }
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* ignore */ }
+  })();
+  if (!pendingPhones) { try { pendingPhones = JSON.parse(lsGet('embrace-phones') || 'null'); } catch (e) { pendingPhones = null; } }
+  function applyPendingPhones() {
+    if (!pendingPhones || !S.loaded || !S.data.publishers.length) return;
+    var ups = [], left = {};
+    var byName = {}; S.data.publishers.forEach(function (p) { byName[p.name.toLowerCase()] = p; });
+    Object.keys(pendingPhones).forEach(function (k) {
+      var p = byName[k], n = pendingPhones[k];
+      if (!p) { left[k] = n; return; }               // not in the list yet: keep for later
+      if (n.length >= 10 && digits(p.phone) !== n) ups.push({ id: p.id, phone: n });
+    });
+    pendingPhones = Object.keys(left).length ? left : null;
+    lsSet('embrace-phones', pendingPhones ? JSON.stringify(pendingPhones) : null);
+    if (ups.length) store.updateMany(ups).then(function () { toast(ups.length + (ups.length === 1 ? ' phone number added' : ' phone numbers added')); });
+  }
+
   /* ---------------- boot ---------------- */
   var subscribed = false;
   store.init(function (st) {
@@ -1209,6 +1239,7 @@
         S.loaded = d.ready !== false; rebuild();
         if (S.meId && S.loaded && !pub(S.meId)) { S.meId = null; lsSet('embrace-me', null); }
         render();
+        applyPendingPhones();
         if (S.sheet && (S.sheet.type === 'visit' || S.sheet.type === 'status' || S.sheet.type === 'group' || S.sheet.type === 'plan')) renderSheet();
       });
     }
