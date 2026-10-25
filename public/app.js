@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '4.4';
+  var VERSION = '4.5';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -281,12 +281,17 @@
   function joinNames(list) { return list.length < 2 ? (list[0] || '') : list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1]; }
   function draftText(sh) {
     var bros = sh.withIds.map(pub).filter(Boolean), visit = sh.visitIds.map(pub).filter(Boolean), m = me();
-    var hi = bros.length === 1 ? 'Hi Brother ' + words(bros[0].name).slice(-1)[0] : 'Hi brothers';
+    var hi = bros.length ? 'Hi ' + joinNames(bros.map(function (b) { return firstName(b.name); })) : 'Hi';
     var whom = visit.length ? ' to see ' + joinNames(visit.map(function (p) { return p.name; })) : '';
     var when = sh.date ? ' on ' + longDate(sh.date) + (sh.time ? ' at ' + fmtTime(sh.time) : '') : '';
     return hi + ', would you be available to go on a shepherding visit with me' + whom + when + '? Let me know if that works for you. Thank you!' + (m ? ' - ' + firstName(m.name) : '');
   }
-  function smsLink(nums, body) { return 'sms:' + nums.join(',') + '?&body=' + encodeURIComponent(body); }
+  var IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  function smsLink(nums, body) {
+    var b = encodeURIComponent(body);
+    if (IOS) return nums.length > 1 ? 'sms:/open?addresses=' + nums.join(',') + '&body=' + b : 'sms:' + nums[0] + '&body=' + b;
+    return 'sms:' + nums.join(',') + '?body=' + b;
+  }
   function planCell(x) {
     var visit = (x.visitNames || []).join(', ') || 'Shepherding visit';
     var who = [x.byName].concat(x.withNames || []).filter(Boolean).join(' & ');
@@ -321,10 +326,9 @@
   }
   function sheetAsk() {
     var sh = S.sheet, bros = brothers().filter(function (b) { return b.id !== S.meId; });
-    var missing = bros.filter(function (b) { return digits(b.phone).length < 10; }).length;
-    var chip = function (b) {
+        var chip = function (b) {
       var has = digits(b.phone).length >= 10;
-      return '<button class="chip" data-action="ask-with" data-id="' + esc(b.id) + '" aria-pressed="' + (sh.withIds.indexOf(b.id) >= 0) + '"' + (has || !sh.text ? '' : ' disabled title="No phone number yet"') + '>' + esc(b.name) + '</button>';
+      return '<button class="chip" data-action="ask-with" data-id="' + esc(b.id) + '" aria-pressed="' + (sh.withIds.indexOf(b.id) >= 0) + '">' + esc(b.name) + (has || !sh.text ? '' : ' <span class="nonum">no number</span>') + '</button>';
     };
     var el = bros.filter(function (b) { return b.rank === 'Elder'; }), sv = bros.filter(function (b) { return b.rank === 'Ministerial Servant'; });
     var chosen = sh.visitIds.map(pub).filter(Boolean);
@@ -332,7 +336,10 @@
       '<h2 class="label">Who would you like to go with?</h2><div class="glass">' +
       (el.length ? '<div class="chips-label">Elders</div><div class="chips">' + el.map(chip).join('') + '</div>' : '') +
       (sv.length ? '<div class="chips-label">Ministerial servants</div><div class="chips">' + sv.map(chip).join('') + '</div>' : '') + '</div>' +
-      (sh.text && missing ? '<p class="foot" style="text-align:left;margin-top:-8px">Grayed-out names have no phone number yet. Add it on their page with Edit.</p>' : '') +
+      (sh.text ? sh.withIds.map(pub).filter(function (b) { return b && digits(b.phone).length < 10; }).map(function (b) {
+        return '<div class="glass list"><div class="field"><label for="askph-' + esc(b.id) + '">' + esc(firstName(b.name)) + '’s phone</label>' +
+          '<input id="askph-' + esc(b.id) + '" data-pid="' + esc(b.id) + '" class="ask-phone" type="tel" inputmode="tel" placeholder="(419) 555-1234" style="flex:1;min-width:0;height:42px;border:none;background:transparent;font-size:17px;text-align:right;color:var(--fg)"></div></div>';
+      }).join('') : '') +
       '<h2 class="label">Who are you visiting?</h2><div class="glass list">' +
       (chosen.length ? '<div class="chips">' + chosen.map(function (p) { return '<button class="chip" data-action="ask-visit" data-id="' + esc(p.id) + '" aria-pressed="true">' + esc(p.name) + ' ✕</button>'; }).join('') + '</div>' : '') +
       '<label class="search" style="border-radius:0">' + I.search + '<span class="sr">Find a name</span><input id="ask-search" type="search" autocomplete="off" placeholder="Type a name" value="' + esc(sh.q) + '"></label>' +
@@ -900,7 +907,7 @@
     'ask-with': function (el) {
       var w = S.sheet.withIds, id = el.dataset.id, i = w.indexOf(id);
       if (i >= 0) w.splice(i, 1); else w.push(id);
-      el.setAttribute('aria-pressed', String(i < 0)); refreshMsg();
+      keepAsk(); renderSheet();
     },
     'ask-visit': function (el) {
       var v = S.sheet.visitIds, id = el.dataset.id, i = v.indexOf(id);
@@ -910,8 +917,12 @@
     'ask-send': function () {
       var sh = S.sheet; keepAsk();
       if (!sh.date) return showErr('ask-err', 'Tap a day on the calendar.');
-      var bros = sh.withIds.map(pub).filter(Boolean);
-      var nums = bros.map(function (b) { return digits(b.phone); }).filter(function (n) { return n.length >= 10; });
+      var bros = sh.withIds.map(pub).filter(Boolean), typed = {};
+      Array.prototype.forEach.call(document.querySelectorAll('.ask-phone'), function (inp) {
+        var n = digits(inp.value); if (n.length >= 10) { typed[inp.dataset.pid] = n; store.savePublisher({ id: inp.dataset.pid, phone: n }); }
+      });
+      var nums = bros.map(function (b) { return digits(b.phone).length >= 10 ? digits(b.phone) : typed[b.id] || ''; }).filter(function (n) { return n.length >= 10; });
+      if (sh.text && nums.length < bros.length) return showErr('ask-err', 'Type a phone number for each brother you picked.');
       if (sh.text && !nums.length) return showErr('ask-err', 'Tap at least one brother who has a phone number.');
       if (!sh.text && !sh.share) return showErr('ask-err', 'Turn on the text message or the shared calendar.');
       var msg = sh.text ? (document.getElementById('ask-msg').value || draftText(sh)) : '';
@@ -1076,6 +1087,10 @@
     if (t.id === 's-cong') store.saveSettings({ congregationName: t.value.trim() });
     if (t.id === 's-od') store.saveSettings({ overdueDays: +t.value });
     if (t.id === 's-phone' && me()) store.savePublisher({ id: S.meId, phone: digits(t.value) }).then(function () { toast('Saved'); });
+    if (t.classList && t.classList.contains('ask-phone')) {
+      var num = digits(t.value), pid = t.dataset.pid;
+      if (num.length >= 10) store.savePublisher({ id: pid, phone: num }).then(function () { keepAsk(); renderSheet(); toast('Number saved'); });
+    }
     if (t.id === 'ask-text' || t.id === 'ask-share') { keepAsk(); S.sheet[t.id === 'ask-text' ? 'text' : 'share'] = t.checked; renderSheet(); }
     if (t.id === 'import-file' && t.files && t.files[0]) {
       var r = new FileReader();

@@ -52,6 +52,11 @@ public class MainActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
+                String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase();
+                if (scheme.equals("sms") || scheme.equals("smsto")) {
+                    openTextMessage(uri);
+                    return true;
+                }
                 String host = uri.getHost() == null ? "" : uri.getHost();
                 if (host.equals(HOME_HOST) || host.endsWith("firebaseapp.com") || host.endsWith("googleapis.com")) {
                     return false;
@@ -86,6 +91,35 @@ public class MainActivity extends Activity {
 
         if (saved != null) web.restoreState(saved);
         else web.loadUrl(HOME);
+    }
+
+    /** Opens the phone's texting app with the numbers and the drafted message filled in. */
+    private void openTextMessage(Uri uri) {
+        String part = uri.getEncodedSchemeSpecificPart();
+        if (part == null) part = "";
+        String numbers = part, body = null;
+        int q = part.indexOf('?');
+        if (q >= 0) {
+            numbers = part.substring(0, q);
+            for (String kv : part.substring(q + 1).split("&")) {
+                if (kv.startsWith("body=")) body = Uri.decode(kv.substring(5));
+            }
+        }
+        numbers = Uri.decode(numbers).replace(",", ";");
+        Intent text = new Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + numbers));
+        if (body != null) {
+            text.putExtra("sms_body", body);
+            text.putExtra(Intent.EXTRA_TEXT, body);
+        }
+        try {
+            startActivity(text);
+        } catch (ActivityNotFoundException e) {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, uri));
+            } catch (ActivityNotFoundException ignored) {
+                // No texting app on this phone.
+            }
+        }
     }
 
     private boolean isNight() {
