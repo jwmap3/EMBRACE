@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '3.12';
+  var VERSION = '3.13';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -21,8 +21,9 @@
     late: { label: 'Waiting', long: 'Waiting for a visit', color: 'var(--st-late)' },
     none: { label: 'Not yet', long: 'Not yet visited', color: 'var(--st-none)' }
   };
-  var ORDER = ['fresh', 'soon', 'none'];
-  function homeState(p) { var s = state(p); return s === 'late' ? 'none' : s; }
+  // Two simple states everywhere on screen: visited within the window, or not yet.
+  var ORDER = ['fresh', 'none'];
+  function homeState(p) { var s = state(p); return s === 'fresh' || s === 'soon' ? 'fresh' : 'none'; }
   var PREVIEW = !!window.EMBRACE_PREVIEW;
   var store = window.EmbraceStore.create();
 
@@ -158,10 +159,10 @@
     return bits.join(' · ');
   }
   function endHtml(p) {
-    var w = waiting(p), st = state(p);
+    var w = waiting(p), st = homeState(p);
     var dot = '<i class="dot" style="background:' + STATUS[st].color + '"></i>';
     var t = w === null ? 'Never' : w <= 0 ? 'Today' : w + (w === 1 ? ' day' : ' days');
-    return '<span class="end' + (st === 'late' || st === 'none' ? ' late' : '') + '">' + dot + t + I.chev + '</span>';
+    return '<span class="end' + (st === 'none' ? ' late' : '') + '">' + dot + t + I.chev + '</span>';
   }
   function cell(p, action, plain) {
     var sub = subline(p);
@@ -364,7 +365,7 @@
   }
 
   function viewPerson(p) {
-    var vs = idx.byPub[p.id] || [], l = vs[0], w = l ? daysSince(l.date) : null, st = state(p);
+    var vs = idx.byPub[p.id] || [], l = vs[0], w = l ? daysSince(l.date) : null, st = homeState(p);
     var t = titles(p);
     var sub = (t.length ? t : ['Publisher']).concat(p.group ? [p.group + ' group'] : []).join(' · ');
     var frac = w === null ? 1 : Math.min(1, Math.max(0.02, w / od()));
@@ -375,7 +376,7 @@
       '<div class="glass hero rise"><span class="av big" aria-hidden="true">' + arc + esc(initials(p.name)) + '</span><h1>' + esc(p.name) + '</h1><p>' + esc(sub) + '</p>' +
       (p.note ? '<p>' + esc(p.note) + '</p>' : '') +
       '<div class="stat-row"><div class="stat"><small>Last visit</small><b>' + (l ? esc(fmtDate(l.date)) : 'Never') + '</b></div>' +
-      '<div class="stat"><small>' + STATUS[st].label + '</small><b style="color:' + STATUS[st].color + '">' +
+      '<div class="stat"><small>Days since visit</small><b style="color:' + (st === 'none' ? 'var(--st-late)' : STATUS[st].color) + '">' +
       (w === null ? '—' : w <= 0 ? 'Today' : w + (w === 1 ? ' day' : ' days')) + '</b></div></div></div>' +
       '<button class="cta rise" data-action="log" data-id="' + esc(p.id) + '">' + I.plus + 'Log a Visit</button>' +
       (vs.length ? '<div class="glass list"><div class="card-head"><h2>Visits</h2></div>' + vs.map(function (v) { return noteRow(v, false); }).join('') + '</div>'
