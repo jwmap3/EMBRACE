@@ -236,6 +236,8 @@ button.cell:active { background: var(--fill); }
 .switch:checked::after { transform: translateX(20px); }
 textarea { display: block; width: 100%; min-height: 140px; border: none; resize: vertical; padding: 16px 18px; font-size: 17px; line-height: 1.45; background: transparent; outline: none; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px; }
+.chips-label { padding: 14px 16px 0; font-size: 13.5px; font-weight: 600; color: var(--fg2); text-transform: uppercase; letter-spacing: .5px; }
+.chips-label + .chips { padding-top: 8px; }
 .chip { min-height: 44px; padding: 0 18px; border-radius: 22px; border: 1px solid var(--line); background: var(--glass-strong); font-size: 16px; font-weight: 550; transition: background .15s, transform .12s; }
 .chip:active { transform: scale(.95); }
 .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }

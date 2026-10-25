@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '3.5';
+  var VERSION = '3.6';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -471,12 +471,16 @@
     var sh = S.sheet, els = elders();
     if (S.meId && me() && !els.some(function (e) { return e.id === S.meId; })) els.unshift(me());
     els.sort(function (a, b) { return a.id === S.meId ? -1 : b.id === S.meId ? 1 : byName(a, b); });
+    var servants = S.data.publishers.filter(function (x) { return x.rank === 'Ministerial Servant' && x.id !== S.meId; }).sort(byName);
+    var chip = function (e) {
+      return '<button class="chip" data-action="with" data-id="' + esc(e.id) + '" aria-pressed="' + (sh.with.indexOf(e.id) >= 0) + '">' + esc(e.id === S.meId ? 'Me' : e.name) + '</button>';
+    };
     return head('Log a Visit', '<button class="link" data-action="save-visit">Save</button>') +
       '<div class="hero" style="padding:4px 0 0;gap:4px"><span class="av" aria-hidden="true">' + esc(initials(p.name)) + '</span><h1 style="font-size:24px;margin-top:4px">' + esc(p.name) + '</h1></div>' +
-      '<h2 class="label">Who went with you?</h2><div class="glass"><div class="chips" role="group" aria-label="Elders on this visit">' +
-      els.map(function (e) {
-        return '<button class="chip" data-action="with" data-id="' + esc(e.id) + '" aria-pressed="' + (sh.with.indexOf(e.id) >= 0) + '">' + esc(e.id === S.meId ? 'Me' : e.name) + '</button>';
-      }).join('') + '</div></div>' +
+      '<h2 class="label">Who went with you?</h2><div class="glass">' +
+      '<div class="chips-label">Elders</div><div class="chips" role="group" aria-label="Elders on this visit">' + els.map(chip).join('') + '</div>' +
+      (servants.length ? '<div class="chips-label">Ministerial servants</div><div class="chips" role="group" aria-label="Ministerial servants on this visit">' + servants.map(chip).join('') + '</div>' : '') +
+      '</div>' +
       '<h2 class="label">What day?</h2><div class="glass" id="cal">' + calendar() + '</div>' +
       '<h2 class="label"><label for="v-notes">Notes</label></h2><div class="glass list"><textarea id="v-notes" placeholder="What was shared, how they are doing, anything to follow up on"></textarea>' +
       '<label class="field" for="v-fu"><span>Needs a follow-up</span><input class="switch" id="v-fu" type="checkbox"></label></div>' +
