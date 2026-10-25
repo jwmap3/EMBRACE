@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '4.3';
+  var VERSION = '4.4';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -676,8 +676,7 @@
     }
     return h + '</div></div>';
   }
-  // Only the brothers who went on a visit (or whoever recorded it) can change it.
-  function canChange(v) { return !!S.meId && ((v.elderIds || []).indexOf(S.meId) >= 0 || v.by === S.meId); }
+  function canChange() { return true; }
   function sheetVisit(v) {
     var p = pub(v.publisherId);
     var h = head('Visit', null, 'Close') +
@@ -692,8 +691,6 @@
       h += S.sheet.confirm
       ? '<div class="glass list"><div class="row-plain"><span>Delete this visit?</span></div><button class="action red" data-action="delete-visit" data-id="' + esc(v.id) + '">Delete</button><button class="action" data-action="unconfirm">Keep it</button></div>'
       : '<button class="quiet glass" data-action="edit-visit" data-id="' + esc(v.id) + '">Edit visit</button><button class="quiet red" data-action="confirm">Delete visit</button>';
-    } else {
-      h += '<p class="foot">Only the brothers who went on this visit can edit or delete it.</p>';
     }
     return h;
   }
