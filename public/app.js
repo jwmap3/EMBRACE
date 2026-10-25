@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '3.7';
+  var VERSION = '3.8';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -467,27 +467,54 @@
       return cand.length ? '<div class="glass list">' + cand.map(function (p) { return cell(p, 'make', true); }).join('') + '</div>' : '<div class="glass empty"><span>No name matches.</span></div>';
     }
     var list = needOrder(S.data.publishers.filter(function (p) { return (p.rank !== 'Removed' || q) && (!q || p.name.toLowerCase().indexOf(q) >= 0); })).slice(0, q ? 40 : 6);
-    if (!list.length) return '<div class="glass empty"><span>No name matches.</span></div>';
-    return (q ? '' : '<h2 class="label" style="margin-bottom:8px">Waiting the longest</h2>') +
-      '<div class="glass list">' + list.map(function (p) { return cell(p, forLog ? 'pick' : 'open'); }).join('') + '</div>';
+    var sel = forLog ? S.sheet.sel : [];
+    var chosen = forLog && sel.length ? '<h2 class="label" style="margin-bottom:8px">Chosen · ' + sel.length + '</h2><div class="glass"><div class="chips">' +
+      sel.map(function (id) { var p = pub(id); return p ? '<button class="chip" data-action="pick" data-id="' + esc(id) + '" aria-pressed="true">' + esc(p.name) + ' ✕</button>' : ''; }).join('') + '</div></div>' : '';
+    if (!list.length) return chosen + '<div class="glass empty"><span>No name matches.</span></div>';
+    return chosen + (q ? '' : '<h2 class="label" style="margin-bottom:8px">Waiting the longest</h2>') +
+      '<div class="glass list">' + list.map(function (p) { return forLog ? pickCell(p, sel.indexOf(p.id) >= 0) : cell(p, 'open'); }).join('') + '</div>' +
+      (forLog && sel.length ? '<div class="sheet-foot"><button class="cta" data-action="pick-done">Continue with ' + sel.length + (sel.length === 1 ? ' person' : ' people') + '</button></div>' : '');
+  }
+  // A row in "Who did you visit?": tap to tick, tap again to untick.
+  function pickCell(p, on) {
+    var sub = subline(p);
+    return '<button class="cell' + (on ? ' ticked' : '') + '" data-action="pick" data-id="' + esc(p.id) + '" aria-pressed="' + on + '">' +
+      '<span class="av" aria-hidden="true">' + esc(initials(p.name)) + '</span>' +
+      '<span class="txt"><b>' + esc(p.name) + '</b>' + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</span>' +
+      '<span class="tick" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span></button>';
+  }
+  function familyOf(p) {
+    return S.data.publishers.filter(function (x) { return x.id !== p.id && x.rank !== 'Removed' && x.group === p.group && lastName(x.name) === lastName(p.name); });
   }
   function sheetPick(forLog) {
     var q = (S.sheet.q || '').trim().toLowerCase();
     var title = S.sheet.type === 'assign' ? (S.sheet.rank === 'Elder' ? 'Add an Elder' : 'Add a Servant') : forLog ? 'Who did you visit?' : 'Find someone';
-    return head(title, null, 'Close') +
+    var hint = S.sheet.type === 'pick' ? '<p class="sub" style="margin-top:-8px">Tap everyone you visited. You can pick a whole family.</p>' : '';
+    return head(title, null, 'Close') + hint +
       '<label class="search glass">' + I.search + '<span class="sr">Find a name</span><input id="pick-search" type="search" autocomplete="off" placeholder="Type a name" value="' + esc(S.sheet.q || '') + '"></label>' +
       '<div id="pick-list">' + pickResults(q, forLog) + '</div>';
   }
-  function sheetLog(p) {
+  function sheetLog() {
     var sh = S.sheet, els = elders();
+    var people = sh.ids.map(pub).filter(Boolean);
     if (S.meId && me() && !els.some(function (e) { return e.id === S.meId; })) els.unshift(me());
     els.sort(function (a, b) { return a.id === S.meId ? -1 : b.id === S.meId ? 1 : byName(a, b); });
     var servants = S.data.publishers.filter(function (x) { return x.rank === 'Ministerial Servant' && x.id !== S.meId; }).sort(byName);
     var chip = function (e) {
       return '<button class="chip" data-action="with" data-id="' + esc(e.id) + '" aria-pressed="' + (sh.with.indexOf(e.id) >= 0) + '">' + esc(e.id === S.meId ? 'Me' : e.name) + '</button>';
     };
-    return head('Log a Visit', '<button class="link" data-action="save-visit">Save</button>') +
-      '<div class="hero" style="padding:4px 0 0;gap:4px"><span class="av" aria-hidden="true">' + esc(initials(p.name)) + '</span><h1 style="font-size:24px;margin-top:4px">' + esc(p.name) + '</h1></div>' +
+    var extra = {};
+    people.forEach(function (p) { familyOf(p).forEach(function (x) { if (sh.ids.indexOf(x.id) < 0) extra[x.id] = x; }); });
+    var extraList = Object.keys(extra).map(function (k) { return extra[k]; });
+    var top = people.length === 1
+      ? '<div class="hero" style="padding:4px 0 0;gap:4px"><span class="av" aria-hidden="true">' + esc(initials(people[0].name)) + '</span><h1 style="font-size:24px;margin-top:4px">' + esc(people[0].name) + '</h1></div>'
+      : '<h2 class="label">Visiting ' + people.length + ' people</h2><div class="glass"><div class="chips">' + people.map(function (p) {
+          return '<span class="chip" aria-pressed="true" style="display:inline-flex;align-items:center">' + esc(p.name) + '</span>';
+        }).join('') + '</div></div>';
+    if (extraList.length) {
+      top += '<button class="quiet glass" data-action="add-family">Add the rest of the family: ' + esc(extraList.map(function (x) { return firstName(x.name); }).join(', ')) + '</button>';
+    }
+    return head('Log a Visit', '<button class="link" data-action="save-visit">Save</button>') + top +
       '<h2 class="label">Who went with you?</h2><div class="glass">' +
       '<div class="chips-label">Elders</div><div class="chips" role="group" aria-label="Elders on this visit">' + els.map(chip).join('') + '</div>' +
       (servants.length ? '<div class="chips-label">Ministerial servants</div><div class="chips" role="group" aria-label="Ministerial servants on this visit">' + servants.map(chip).join('') + '</div>' : '') +
@@ -607,7 +634,7 @@
     if (!sh) { $sheet.innerHTML = ''; document.body.style.overflow = ''; return; }
     if (sh.type === 'pick') body = sheetPick(true);
     else if (sh.type === 'find' || sh.type === 'assign') body = sheetPick(false);
-    else if (sh.type === 'log') { var p = pub(sh.id); if (!p) return closeSheet(); body = sheetLog(p); }
+    else if (sh.type === 'log') { if (!sh.ids.map(pub).filter(Boolean).length) return closeSheet(); body = sheetLog(); }
     else if (sh.type === 'visit') { var v = visit(sh.id); if (!v) return closeSheet(); body = sheetVisit(v); }
     else if (sh.type === 'status') body = sheetStatus(sh.st);
     else if (sh.type === 'group') body = sheetGroup(sh.g);
@@ -647,9 +674,9 @@
     S.pubId = id; render(); window.scrollTo(0, 0);
     if (!was) push();
   }
-  function logSheet(id) {
+  function logSheet(ids) {
     var now = new Date();
-    return { type: 'log', id: id, with: S.meId ? [S.meId] : [], date: todayStr(), calY: now.getFullYear(), calM: now.getMonth() };
+    return { type: 'log', ids: ids.slice(), with: S.meId ? [S.meId] : [], date: todayStr(), calY: now.getFullYear(), calM: now.getMonth() };
   }
   function showErr(id, msg) { var el = document.getElementById(id); if (el) { el.textContent = msg; el.hidden = false; } }
   function fail(id) { return function (e) { S.busy = false; showErr(id, window.EmbraceStore.friendly(e)); }; }
@@ -671,18 +698,31 @@
     },
     open: function (el) { openPerson(el.dataset.id); },
     back: function () { pop(function () { S.pubId = null; render(); window.scrollTo(0, S.scroll[S.tab] || 0); }); },
-    'log-start': function () { openSheet({ type: 'pick', q: '' }); focusLater('pick-search'); },
+    'log-start': function () { openSheet({ type: 'pick', q: '', sel: [] }); },
     find: function () { openSheet({ type: 'find', q: '' }); focusLater('pick-search'); },
     status: function (el) { openSheet({ type: 'status', st: el.dataset.st }); },
     'group-sheet': function (el) { openSheet({ type: 'group', g: el.dataset.g }); },
     'all-visits': function () { openSheet({ type: 'visits' }); },
-    pick: function (el) { swapSheet(logSheet(el.dataset.id)); },
+    pick: function (el) {
+      var sel = S.sheet.sel, id = el.dataset.id, i = sel.indexOf(id);
+      if (i >= 0) sel.splice(i, 1); else sel.push(id);
+      var box = document.getElementById('pick-list');
+      if (box) box.innerHTML = pickResults((S.sheet.q || '').trim().toLowerCase(), true);
+    },
+    'pick-done': function () { if (S.sheet.sel.length) swapSheet(logSheet(S.sheet.sel)); },
+    'add-family': function () {
+      var sh = S.sheet, notes = document.getElementById('v-notes'), fu = document.getElementById('v-fu');
+      var keep = { notes: notes ? notes.value : '', fu: fu ? fu.checked : false };
+      sh.ids.map(pub).filter(Boolean).forEach(function (p) { familyOf(p).forEach(function (x) { if (sh.ids.indexOf(x.id) < 0) sh.ids.push(x.id); }); });
+      renderSheet();
+      document.getElementById('v-notes').value = keep.notes; document.getElementById('v-fu').checked = keep.fu;
+    },
     assign: function (el) { openSheet({ type: 'assign', rank: el.dataset.rank, q: '' }); focusLater('pick-search'); },
     make: function (el) {
       var p = pub(el.dataset.id), r = S.sheet.rank;
       store.savePublisher({ id: p.id, rank: r }).then(function () { closeSheet(); toast(firstName(p.name) + ' is now ' + (r === 'Elder' ? 'an elder' : 'a servant')); });
     },
-    log: function (el) { openSheet(logSheet(el.dataset.id)); },
+    log: function (el) { openSheet(logSheet([el.dataset.id])); },
     with: function (el) {
       var w = S.sheet.with, id = el.dataset.id, i = w.indexOf(id);
       if (i >= 0) w.splice(i, 1); else w.push(id);
@@ -695,16 +735,19 @@
     },
     day: function (el) { S.sheet.date = el.dataset.date; document.getElementById('cal').innerHTML = calendar(); },
     'save-visit': function () {
-      var sh = S.sheet, p = pub(sh.id);
-      if (!p || S.busy) return;
+      var sh = S.sheet, people = sh.ids.map(pub).filter(Boolean);
+      if (!people.length || S.busy) return;
       if (!sh.with.length) return showErr('v-err', 'Tap at least one name under "Who went with you?"');
       if (sh.date > todayStr()) return showErr('v-err', 'Pick a day that has already happened.');
       var names = sh.with.map(function (id) { var e = pub(id); return e ? e.name : ''; }).filter(Boolean);
       S.busy = true;
-      store.addVisit({
-        publisherId: p.id, publisherName: p.name, date: sh.date, elders: names, elderIds: sh.with.slice(),
-        notes: document.getElementById('v-notes').value.trim(), followUp: document.getElementById('v-fu').checked, by: S.meId
-      }).then(function () { S.busy = false; closeSheet(); trot(firstName(p.name) + '’s visit saved'); }, fail('v-err'));
+      var notes = document.getElementById('v-notes').value.trim(), fu = document.getElementById('v-fu').checked;
+      store.addVisits(people.map(function (p) {
+        return { publisherId: p.id, publisherName: p.name, date: sh.date, elders: names, elderIds: sh.with.slice(), notes: notes, followUp: fu, by: S.meId };
+      })).then(function () {
+        S.busy = false; closeSheet();
+        trot(people.length === 1 ? firstName(people[0].name) + '’s visit saved' : people.length + ' visits saved');
+      }, fail('v-err'));
     },
     visit: function (el) { openSheet({ type: 'visit', id: el.dataset.id }); },
     'delete-visit': function (el) { store.deleteVisit(el.dataset.id).then(function () { closeSheet(); toast('Visit deleted'); }); },
