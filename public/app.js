@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '4.6';
+  var VERSION = '4.7';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -404,8 +404,7 @@
         return '<button class="key glass" data-action="status" data-st="' + k + '"><i style="background:' + STATUS[k].color + '"></i><span>' + STATUS[k].label + '</span><b>' + counts[k] + '</b></button>';
       }).join('') + '</div>' +
       '<button class="cta rise" data-action="log-start">' + I.plus + 'Log a Visit</button>' +
-      '<div class="duo rise"><button class="pill-search glass" data-action="find">' + I.search + 'Find someone</button>' +
-      '<button class="pill-search glass" data-action="ask" style="color:var(--accent);font-weight:600">' + I.chat + 'Ask a brother</button></div>';
+      '';
     var tiles = ['pioneers', 'appointed', 'publishers', 'inactive'].filter(function (g) { return members(g).length; });
     if (tiles.length) h += '<div class="duo rise">' + tiles.map(tile).join('') + '</div>';
     if (follow.length) {
