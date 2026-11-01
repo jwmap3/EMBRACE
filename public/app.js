@@ -2,11 +2,13 @@
 (function () {
   'use strict';
 
-  var VERSION = '4.7';
+  var VERSION = '4.8';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
-  var ROLES = ['Coordinator', 'Secretary', 'Service Overseer', 'Group Overseer'];
+  var ROLES = ['Coordinator', 'Secretary', 'Service Overseer', 'Group Overseer', 'Circuit Overseer'];
+  // The circuit overseer can sign in and go on visits, but isn't part of the congregation's flock.
+  function isVisitor(p) { return (p.roles || []).indexOf('Circuit Overseer') >= 0; }
   // Older records kept the pioneer status in the privilege field.
   function norm(p) {
     var q = Object.assign({ pioneer: '', roles: [] }, p);
@@ -115,7 +117,7 @@
       return pa - pb || byNeed(a, b);
     });
   }
-  function flock() { return S.data.publishers.filter(function (p) { return p.rank !== 'Removed'; }); }
+  function flock() { return S.data.publishers.filter(function (p) { return p.rank !== 'Removed' && !isVisitor(p); }); }
 
   /* ---------------- art ---------------- */
   function sheep(size, extra, flip) {
@@ -420,7 +422,7 @@
   }
 
   function flockList() {
-    var all = S.data.publishers;
+    var all = S.data.publishers.filter(function (p) { return !isVisitor(p); });
     if (!all.length) return empty('No publishers yet', 'Add your publisher list in Settings.');
     var q = S.query.trim().toLowerCase();
     var list = all.filter(function (p) { return (S.group === 'all' || (p.group || '') === S.group) && (!q || p.name.toLowerCase().indexOf(q) >= 0); });
@@ -1200,6 +1202,32 @@
   /* ---------------- phone numbers from a shared link ----------------
      A link ending in #phones=... carries "name:number" pairs (never stored in the code).
      Once this phone is unlocked and the list has loaded, matching people get their numbers. */
+  var pendingPerson = null;
+  (function () {
+    var h = location.hash || '';
+    if (h.indexOf('#person=') !== 0) return;
+    try {
+      var bits = decodeURIComponent(h.slice(8)).split('|');
+      if (bits[0] && bits[0].trim()) { pendingPerson = { name: bits[0].trim(), rank: bits[1] || 'Elder', role: bits[2] || '' }; lsSet('embrace-person', JSON.stringify(pendingPerson)); }
+    } catch (e) { /* bad link */ }
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* ignore */ }
+  })();
+  if (!pendingPerson) { try { pendingPerson = JSON.parse(lsGet('embrace-person') || 'null'); } catch (e) { pendingPerson = null; } }
+  function applyPendingPerson() {
+    if (!pendingPerson || !S.loaded) return;
+    var want = pendingPerson; pendingPerson = null; lsSet('embrace-person', null);
+    var have = S.data.publishers.filter(function (p) { return p.name.toLowerCase() === want.name.toLowerCase(); })[0];
+    var roles = want.role ? [want.role] : [];
+    if (have) {
+      if (have.rank !== want.rank || (want.role && (have.roles || []).indexOf(want.role) < 0)) {
+        store.savePublisher({ id: have.id, rank: want.rank, roles: (have.roles || []).concat(roles).filter(function (r, i, a) { return a.indexOf(r) === i; }) });
+      }
+      return;
+    }
+    store.savePublisher({ name: want.name, rank: want.rank, roles: roles, pioneer: '', group: '', appointedWife: false, note: '' })
+      .then(function () { toast(firstName(want.name) + ' can now sign in'); });
+  }
+
   var pendingPhones = null;
   (function () {
     var h = location.hash || '';
@@ -1239,6 +1267,7 @@
         if (S.meId && S.loaded && !pub(S.meId)) { S.meId = null; lsSet('embrace-me', null); }
         render();
         applyPendingPhones();
+        applyPendingPerson();
         if (S.sheet && (S.sheet.type === 'visit' || S.sheet.type === 'status' || S.sheet.type === 'group' || S.sheet.type === 'plan')) renderSheet();
       });
     }
