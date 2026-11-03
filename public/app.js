@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '4.8';
+  var VERSION = '4.9';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -390,7 +390,7 @@
     var follow = S.data.publishers.filter(function (p) { var l = last(p); return l && l.followUp; }).sort(byNeed);
     var recent = S.data.visits.slice().sort(visitOrder).slice(0, 3);
 
-    var h = '<div class="screen">' +
+    var h = '<div class="screen home">' +
       '<div class="top rise"><span class="hello">' + greeting() + (m ? ', ' + esc(firstName(m.name)) : '') + '</span><h1 class="brand">Embrace</h1>' + (cong ? '<span class="sub">' + esc(cong) + '</span>' : '') + '</div>';
     // Until the congregation's list is in, the first thing on Home is the button to bring it in.
     if (S.data.publishers.length < 10) {
@@ -400,13 +400,13 @@
         '<input id="import-file" type="file" accept=".csv,text/csv,text/plain,text/comma-separated-values,*/*" hidden></div>';
       if (!all.length) return h + '</div>';
     }
-    h += '<div class="ring-wrap rise"><div class="ring-float"><div class="ring-glow"></div>' + ringSvg(counts, all.length) +
+    h += '<div class="home-left"><div class="ring-wrap rise"><div class="ring-float"><div class="ring-glow"></div>' + ringSvg(counts, all.length) +
       '<div class="ring-center"><b>' + seen + '</b><span>of ' + all.length + ' visited in the last ' + odText() + '</span></div></div></div>' +
       '<div class="legend rise">' + ORDER.map(function (k) {
         return '<button class="key glass" data-action="status" data-st="' + k + '"><i style="background:' + STATUS[k].color + '"></i><span>' + STATUS[k].label + '</span><b>' + counts[k] + '</b></button>';
       }).join('') + '</div>' +
       '<button class="cta rise" data-action="log-start">' + I.plus + 'Log a Visit</button>' +
-      '';
+      '</div><div class="home-right">';
     var tiles = ['pioneers', 'appointed', 'publishers', 'inactive'].filter(function (g) { return members(g).length; });
     if (tiles.length) h += '<div class="duo rise">' + tiles.map(tile).join('') + '</div>';
     if (follow.length) {
@@ -418,7 +418,7 @@
     }
     h += '<div class="glass list"><div class="card-head"><h2>Recent visits</h2>' + (recent.length ? '<button data-action="all-visits">See all</button>' : '') + '</div>' +
       (recent.length ? recent.map(function (v) { return noteRow(v, true); }).join('') : '<div class="empty" style="padding:8px 18px 22px"><span>No visits yet. Tap Log a Visit to add the first one.</span></div>') + '</div>';
-    return h + '</div>';
+    return h + '</div></div>';
   }
 
   function flockList() {
