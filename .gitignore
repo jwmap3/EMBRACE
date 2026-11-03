@@ -12,3 +12,5 @@ android/app/build/
 android/build/
 *.jks
 *.apk
+desktop/node_modules/
+desktop/dist/

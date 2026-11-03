@@ -1,0 +1,35 @@
+# Builds Embrace-Setup.exe (Embrace for Windows) and posts it under the "desktop" release.
+# Download link: https://github.com/jwmap3/EMBRACE/releases/download/desktop/Embrace-Setup.exe
+name: Build Windows app
+
+on:
+  push:
+    branches: [main]
+    paths: ['desktop/**', '.github/workflows/desktop.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build installer
+        working-directory: desktop
+        run: |
+          npm install --no-audit --no-fund
+          npx electron-builder --win nsis --publish never
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: desktop
+          name: Embrace for Windows
+          body: |
+            Download **Embrace-Setup.exe** below and double-click it to install.
+            If Windows shows "Windows protected your PC", click **More info**, then **Run anyway**.
+          files: desktop/dist/Embrace-Setup.exe
+          make_latest: false

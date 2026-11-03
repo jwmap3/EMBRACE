@@ -1,0 +1,34 @@
+{
+  "name": "embrace",
+  "productName": "Embrace",
+  "version": "1.0.0",
+  "description": "Shepherding visit tracker for the body of elders",
+  "author": "Northwood Congregation",
+  "main": "main.js",
+  "private": true,
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "org.embrace.shepherding",
+    "productName": "Embrace",
+    "files": ["main.js", "icon.png", "icon.ico"],
+    "directories": { "output": "dist" },
+    "win": {
+      "target": "nsis",
+      "icon": "icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Embrace",
+      "installerIcon": "icon.ico",
+      "uninstallDisplayName": "Embrace",
+      "artifactName": "Embrace-Setup.${ext}"
+    }
+  }
+}
