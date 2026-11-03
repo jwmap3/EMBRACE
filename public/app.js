@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '4.9';
+  var VERSION = '4.10';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -569,10 +569,14 @@
         '<p class="err" id="gate-err" role="alert" hidden></p></div>';
     }
     // Only elders who have not yet picked their name on any phone are offered.
+    // New elders first; elders already using Embrace on another phone or computer stay available below.
     var els = elders().filter(function (p) { return !p.claimed; }), h = '<div class="welcome">' + sheep(110, 'bob') + '<h1>Who are you?</h1>';
-    if (!S.whoAll && els.length) {
-      return h + '<p>Tap your name. Embrace will remember you on this phone.</p>' +
-        '<div class="glass list">' + els.map(function (p) { return cell(p, 'iam', true); }).join('') + '</div>' +
+    var again = elders().filter(function (p) { return p.claimed; });
+    if (!S.whoAll && (els.length || again.length)) {
+      return h + '<p>Tap your name. Embrace will remember you on this device.</p>' +
+        (els.length ? '<div class="glass list">' + els.map(function (p) { return cell(p, 'iam', true); }).join('') + '</div>' : '') +
+        (again.length ? '<h2 class="label" style="align-self:stretch;max-width:420px;width:100%;margin:6px auto -10px;text-align:left">Already using Embrace on another device</h2>' +
+          '<div class="glass list">' + again.map(function (p) { return cell(p, 'iam', true); }).join('') + '</div>' : '') +
         '<button class="quiet" data-action="who-all">My name isn\'t here</button></div>';
     }
     h += '<p>Type your name. Embrace will remember you on this phone.</p>' +
