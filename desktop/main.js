@@ -27,6 +27,7 @@ function createWindow() {
     backgroundColor: '#DCE9E4',
     icon: path.join(__dirname, 'icon.png'),
     autoHideMenuBar: true,
+    show: false,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
   });
 
@@ -43,6 +44,12 @@ function createWindow() {
       '<body style="margin:0;height:100vh;display:grid;place-items:center;background:#DCE9E4;font-family:Segoe UI,sans-serif;color:#1D2620">' +
       '<div style="text-align:center"><h1 style="font-weight:600">Embrace</h1><p>Waiting for an internet connection…</p></div></body>'));
     setTimeout(() => { if (win) win.loadURL(HOME); }, 5000);
+  });
+
+  // Open filling the whole screen; F11 switches to true full screen and back.
+  win.once('ready-to-show', () => { win.maximize(); win.show(); });
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown' && input.key === 'F11') { win.setFullScreen(!win.isFullScreen()); event.preventDefault(); }
   });
 
   win.loadURL(HOME);

@@ -1,7 +1,7 @@
 {
   "name": "embrace",
   "productName": "Embrace",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Shepherding visit tracker for the body of elders",
   "author": "Northwood Congregation",
   "main": "main.js",
