@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '5.0';
+  var VERSION = '5.1';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -1636,6 +1636,53 @@
     if (ups.length) store.updateMany(ups).then(function () { toast(ups.length + (ups.length === 1 ? ' phone number added' : ' phone numbers added')); });
   }
 
+  /* ---------------- talks from a shared link ----------------
+     A link ending in #talks=... carries a schedule as JSON (never stored in the code):
+     { cfg: {day, time}, in: [{date, type, speaker, fromCong, number, title, notes, reason, confirmed}] }.
+     type 'local' finds our brother by name. Weekends that already have something are left alone. */
+  var pendingTalks = null;
+  (function () {
+    var h = location.hash || '';
+    if (h.indexOf('#talks=') !== 0) return;
+    try { pendingTalks = JSON.parse(decodeURIComponent(h.slice(7))); lsSet('embrace-talks', JSON.stringify(pendingTalks)); } catch (e) { /* bad link */ }
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* ignore */ }
+  })();
+  if (!pendingTalks) { try { pendingTalks = JSON.parse(lsGet('embrace-talks') || 'null'); } catch (e) { pendingTalks = null; } }
+  function applyPendingTalks() {
+    if (!pendingTalks || !S.loaded || !S.data.publishers.length) return;
+    var p = pendingTalks; pendingTalks = null; lsSet('embrace-talks', null);
+    var jobs = [], titles = Object.assign({}, tTitles()), added = 0, newTitles = false;
+    if (p.cfg && (p.cfg.time || p.cfg.day != null)) {
+      var c = tCfg();
+      jobs.push(store.putTalk('talkcfg', { day: p.cfg.day != null ? +p.cfg.day : c.day, time: p.cfg.time || c.time }));
+    }
+    (p.in || []).forEach(function (t) {
+      if (!t || !/^\d{4}-\d{2}-\d{2}$/.test(t.date || '') || tFilled(tIn(t.date))) return;
+      var body = { type: t.type === 'none' || t.type === 'local' ? t.type : 'visitor', date: t.date };
+      if (body.type === 'none') body.reason = t.reason || 'No public talk';
+      else {
+        if (body.type === 'local') {
+          var b = S.data.publishers.filter(function (x) { return x.name.toLowerCase() === String(t.speaker || '').toLowerCase(); })[0];
+          if (b) { body.speaker = b.name; body.localId = b.id; body.phone = digits(b.phone); }
+          else { body.type = 'visitor'; body.speaker = t.speaker; body.fromCong = tCong(); }
+          body.confirmed = true;
+        } else {
+          body.speaker = String(t.speaker || '').trim(); body.fromCong = t.fromCong || ''; body.phone = digits(t.phone || '');
+          body.confirmed = !!t.confirmed;
+        }
+        if (!body.speaker) return;
+        body.number = String(t.number || '').replace(/\D/g, ''); body.title = t.title || ''; body.notes = t.notes || '';
+        if (body.number && body.title && titles[body.number] !== body.title) { titles[body.number] = body.title; newTitles = true; }
+      }
+      added++;
+      jobs.push(store.putTalk('talk_in_' + t.date, body));
+    });
+    if (newTitles) jobs.push(store.putTalk('talktitles', { map: titles }));
+    Promise.all(jobs).then(function () {
+      if (added) { S.tab = 'talks'; S.tPart = 'year'; render(); toast(added + (added === 1 ? ' weekend' : ' weekends') + ' added to Talks'); }
+    });
+  }
+
   /* ---------------- boot ---------------- */
   var subscribed = false;
   store.init(function (st) {
@@ -1649,6 +1696,7 @@
         render();
         applyPendingPhones();
         applyPendingPerson();
+        applyPendingTalks();
         if (S.sheet && (S.sheet.type === 'visit' || S.sheet.type === 'status' || S.sheet.type === 'group' || S.sheet.type === 'plan' || S.sheet.type === 't-week' || S.sheet.type === 't-settings')) renderSheet();
       });
     }
