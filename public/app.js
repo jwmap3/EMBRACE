@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '5.1';
+  var VERSION = '5.2';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -468,7 +468,7 @@
     if (part === 'year') h += tYearView();
     else if (part === 'in') h += tInView();
     else h += tOutView();
-    h += '<button class="quiet glass" data-action="t-settings">Talk settings</button>';
+    h += '<button class="quiet glass" data-action="t-import">' + I.plus + ' Import talks</button><button class="quiet glass" data-action="t-settings">Talk settings</button>';
     return h + '</div>';
   }
   function tYearView() {
@@ -497,7 +497,7 @@
     var list = tWeekends(y).concat(tWeekends(y + 1)).filter(function (d) { return d >= today; });
     var planned = list.filter(function (d) { return tFilled(tIn(d)); }).slice(0, 30);
     var open = list.filter(function (d) { return !tFilled(tIn(d)); }).slice(0, 12);
-    return '<h2 class="label">Needs a speaker</h2>' + (open.length ? '<div class="glass list">' + open.map(function (d) { return tWeekRow(d, []); }).join('') + '</div>'
+    return '<button class="quiet glass" data-action="t-import" data-dir="in">' + I.plus + ' Import incoming speakers</button><h2 class="label">Needs a speaker</h2>' + (open.length ? '<div class="glass list">' + open.map(function (d) { return tWeekRow(d, []); }).join('') + '</div>'
       : '<div class="glass empty"><b>All set</b><span>Every coming weekend has a speaker.</span></div>') +
       '<h2 class="label">Coming up</h2>' + (planned.length ? '<div class="glass list">' + planned.map(function (d) { return tWeekRow(d, []); }).join('') + '</div>'
       : '<div class="glass empty"><span>No incoming speakers planned yet.</span></div>');
@@ -506,6 +506,7 @@
     var today = todayStr(), all = tOutAll();
     var up = all.filter(function (o) { return o.date >= today; }), past = all.filter(function (o) { return o.date < today; }).reverse().slice(0, 15);
     var h = '<button class="cta" data-action="t-out-new">' + I.plus + 'Assign an outgoing talk</button>' +
+      '<button class="quiet glass" data-action="t-import" data-dir="out">' + I.plus + ' Import outgoing speakers</button>' +
       '<h2 class="label">Coming up</h2>' + (up.length ? '<div class="glass list">' + up.map(tOutRow).join('') + '</div>'
       : '<div class="glass empty"><span>No outgoing talks planned yet.</span></div>');
     if (past.length) h += '<h2 class="label">Recently given</h2><div class="glass list">' + past.map(tOutRow).join('') + '</div>';
@@ -1162,6 +1163,7 @@
     else if (sh.type === 't-out') body = sheetTOut(sh);
     else if (sh.type === 't-settings') body = sheetTSettings();
     else if (sh.type === 't-copy') body = sheetTCopy(sh.year);
+    else if (sh.type === 't-import') body = sheetTImport(sh);
     else if (sh.type === 'plan') { var pl = planById(sh.id); if (!pl) return closeSheet(); body = sheetPlan(pl); }
     else if (sh.type === 'visits') body = sheetAllVisits();
     else if (sh.type === 'edit') body = sheetEdit(sh.id ? pub(sh.id) : null);
@@ -1422,6 +1424,259 @@
     'cancel-reset': function () { S.confirmReset = false; render(); },
     'do-reset': function () { S.confirmReset = false; S.meId = null; S.ringDrawn = false; lsSet('embrace-me', null); store.resetDemo().then(function () { render(); }); }
   };
+  /* ---------------- Talks: import ----------------
+     Paste rows (from a spreadsheet, a CSV file, or typed: date, speaker, congregation, talk number, title)
+     or the text a meeting-schedule app copies (blocks with Speaker / Congregation / Title / Away Speakers). */
+  var T_MON = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  var T_NONE = /^(no talk|none|no public talk|no meeting|circuit assembly|regional convention|convention|assembly|co visit|circuit overseer|memorial|special talk)/i;
+  function tParseDate(raw) {
+    var s = String(raw || '').trim().replace(/^(sun|mon|tue|wed|thu|fri|sat)[a-z]*\.?,?\s*/i, '');
+    if (!s || s.length > 40) return '';
+    var y, m, d, x;
+    if ((x = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) { y = +x[1]; m = +x[2]; d = +x[3]; }
+    else if ((x = s.match(/^(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](\d{2,4}))?(?:\s+\d{1,2}:\d{2}.*)?$/))) { m = +x[1]; d = +x[2]; y = x[3] ? +x[3] : 0; if (y && y < 100) y += 2000; }
+    else if ((x = s.match(/^([a-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?(?:\s+.*)?$/i)) && T_MON.indexOf(x[1].slice(0, 3).toLowerCase()) >= 0) { m = T_MON.indexOf(x[1].slice(0, 3).toLowerCase()) + 1; d = +x[2]; y = x[3] ? +x[3] : 0; }
+    else if ((x = s.match(/^(\d{1,2})\s+([a-z]{3,9})\.?,?\s*(\d{4})?$/i)) && T_MON.indexOf(x[2].slice(0, 3).toLowerCase()) >= 0) { d = +x[1]; m = T_MON.indexOf(x[2].slice(0, 3).toLowerCase()) + 1; y = x[3] ? +x[3] : 0; }
+    else if (/^\d{5}$/.test(s) && +s > 40000 && +s < 60000) { var ex = new Date(1899, 11, 30); ex.setDate(ex.getDate() + +s); return ymd(ex); }
+    else return '';
+    if (!y) {
+      y = new Date().getFullYear();
+      if (new Date(y, m - 1, d) < new Date(Date.now() - 120 * 864e5)) y++;
+    }
+    var dt = new Date(y, m - 1, d);
+    if (m < 1 || m > 12 || dt.getMonth() !== m - 1 || dt.getDate() !== d) return '';
+    return ymd(dt);
+  }
+  function tSplitTalk(s) {
+    s = String(s || '').trim(); var x;
+    if ((x = s.match(/^(.*\S)\s*\(#?(\d{1,3})\)$/))) return { number: x[2], title: x[1] };
+    if ((x = s.match(/^(?:no\.?\s*|#)?(\d{1,3})(?:[\s.:\-–]+(.*))?$/i))) return { number: x[1], title: (x[2] || '').trim() };
+    return { number: '', title: s };
+  }
+  function tNormName(n) { return String(n || '').toLowerCase().replace(/\([^)]*\)/g, ' ').replace(/[^a-z' ]/g, ' ').replace(/\s+/g, ' ').trim(); }
+  function tFindBro(name) {
+    var n = String(name || '').trim(); if (!n) return null;
+    if (n.indexOf(',') > 0) { var p = n.split(','); n = p[1].trim() + ' ' + p[0].trim(); }
+    var want = tNormName(n), w = want.split(' ');
+    var pool = tSpeakers().concat(S.data.publishers.filter(function (p) { return !isVisitor(p); }));
+    var hit = pool.filter(function (p) { return tNormName(p.name) === want; })[0];
+    if (hit || w.length < 2) return hit || null;
+    // first and last name, ignoring a middle name or nickname
+    var two = pool.filter(function (p) { var q = tNormName(p.name).split(' '); return q[0] === w[0] && q[q.length - 1] === w[w.length - 1]; });
+    return two.length === 1 ? two[0] : null;
+  }
+  function tDirWord(s) {
+    var v = String(s || '').trim().toLowerCase();
+    if (/^(in|incoming|visiting|visitor|home)$/.test(v)) return 'in';
+    if (/^(out|outgoing|away|away speaker)$/.test(v)) return 'out';
+    return '';
+  }
+  var T_COLS = [
+    ['dir', /^(type|direction|in\/out|in or out)$/],
+    ['date', /date|^day$|^week/],
+    ['time', /time/],
+    ['number', /^(talk\s*)?(no|num|number|#|outline)\.?$|talk\s*(#|no|num)|outline|s-?34/],
+    ['title', /title|theme|subject|topic/],
+    ['speaker', /speaker|name|brother|who/],
+    ['cong', /cong|from|^to$|where|hall/],
+    ['notes', /note|comment|hospitality|remark/],
+    ['talk', /^talk$|public talk/]
+  ];
+  function tColOf(h) {
+    var v = String(h || '').trim().toLowerCase();
+    for (var i = 0; i < T_COLS.length; i++) if (T_COLS[i][1].test(v)) return T_COLS[i][0];
+    return '';
+  }
+  function tTableRows(text) {
+    var lines = text.split(/\r?\n/).filter(function (l) { return l.trim(); });
+    var tab = lines.some(function (l) { return l.indexOf('\t') >= 0; });
+    var delim = tab ? '\t' : lines.some(function (l) { return l.indexOf(',') >= 0; }) ? ',' : lines.some(function (l) { return l.indexOf(';') >= 0; }) ? ';' : lines.some(function (l) { return l.indexOf('|') >= 0; }) ? '|' : null;
+    if (delim === ',') return parseCsv(text);
+    return lines.map(function (l) { return delim ? l.split(delim) : [l]; });
+  }
+  function tBlocks(text) {
+    var LABEL = /^(title|speaker|congregation|talk|date|notes?|chairman|hospitality|closing prayer|opening prayer|away speakers?|reader|conductor|watchtower reader)\s*:?\s*(.*)$/i;
+    var blocks = [], cur = null, label = '', bad = [];
+    text.split(/\r?\n/).forEach(function (raw, i) {
+      var l = raw.trim(); if (!l) return;
+      var dt = tParseDate(l.replace(/\s+at\s+.*$/i, ''));
+      if (dt) { cur = { date: dt, f: {}, line: i + 1, extra: [] }; blocks.push(cur); label = ''; return; }
+      if (!cur) { cur = { date: '', f: {}, line: i + 1, extra: [] }; blocks.push(cur); }
+      var m = l.match(LABEL);
+      if (m && (m[2] === '' || l.indexOf(':') > 0)) {
+        label = m[1].toLowerCase().replace(/s$/, '').replace('away speaker', 'away');
+        if (label === 'note') label = 'notes';
+        if (m[2]) { (cur.f[label] = cur.f[label] || []).push(m[2]); if (label !== 'away') label = ''; }
+        return;
+      }
+      if (/^[A-Z0-9 &\-]{4,}$/.test(l) || /^\d{1,2}:\d{2}\s*(am|pm)?$/i.test(l)) { label = ''; return; }   // section headers, meeting time
+      if (label && !/^none$/i.test(l) && !/^request$/i.test(l)) { (cur.f[label] = cur.f[label] || []).push(l); if (label !== 'away') label = ''; return; }
+      cur.extra.push(l); label = '';
+    });
+    var items = [];
+    blocks.forEach(function (b) {
+      var f = function (k) { return (b.f[k] || [])[0] || ''; };
+      var none = !f('speaker') && b.extra.filter(function (x) { return T_NONE.test(x); })[0];
+      if (!b.date) { if (f('speaker') || (b.f.away || []).length) bad.push({ line: b.line, why: 'No date found', text: f('speaker') }); return; }
+      if (f('speaker') || none) {
+        var t = tSplitTalk(f('title') || f('talk'));
+        var notes = [['Chairman', f('chairman')], ['Opening prayer', f('opening prayer')], ['Closing prayer', f('closing prayer')], ['Hospitality', f('hospitality')]]
+          .filter(function (x) { return x[1]; }).map(function (x) { return x[0] + ': ' + x[1]; }).concat(b.f.notes || []).join('. ');
+        items.push(none ? { dir: 'in', date: b.date, none: true, reason: none, line: b.line }
+          : { dir: 'in', date: b.date, speaker: f('speaker'), cong: f('congregation'), number: t.number, title: t.title, notes: notes, line: b.line });
+      }
+      (b.f.away || []).forEach(function (a) {
+        var x = a.match(/^(.*?)\s*\((.*)\)\s*$/);
+        items.push({ dir: 'out', date: b.date, speaker: x ? x[1] : a, cong: x ? x[2] : '', line: b.line });
+      });
+    });
+    return { items: items, bad: bad };
+  }
+  function tParseImport(text, defDir) {
+    text = String(text || '');
+    if (!text.trim()) return { items: [], bad: [] };
+    if (/^\s*(speaker|congregation|title|away speakers?)\s*:?\s*$/im.test(text) || /^\s*(speaker|congregation)\s*:\s*\S/im.test(text)) return tBlocks(text);
+    var rows = tTableRows(text), items = [], bad = [], map = null, start = 0;
+    var first = rows[0] || [];
+    if (!first.some(function (c) { return tParseDate(c); })) {
+      var cols = first.map(tColOf);
+      if (cols.filter(Boolean).length >= 2) { map = cols; start = 1; }
+    }
+    for (var r = start; r < rows.length; r++) {
+      var cells = rows[r].map(function (c) { return String(c || '').trim(); }), it = { dir: defDir, line: r + 1 }, texts = [];
+      if (map) {
+        cells.forEach(function (c, i) {
+          var k = map[i]; if (!c || !k) return;
+          if (k === 'date') it.date = tParseDate(c);
+          else if (k === 'dir') it.dir = tDirWord(c) || defDir;
+          else if (k === 'number') it.number = c.replace(/\D/g, '');
+          else if (k === 'talk' || (k === 'title' && /\(\d{1,3}\)$/.test(c))) { var tt = tSplitTalk(c); if (tt.number) it.number = tt.number; it.title = tt.title; }
+          else it[k] = c;
+        });
+        if (it.speaker && T_NONE.test(it.speaker)) { it.none = true; it.reason = /^(no talk|none|no public talk)$/i.test(it.speaker) ? (it.notes || it.title || it.cong || 'No public talk') : it.speaker; }
+      } else {
+        cells.forEach(function (c) {
+          if (!c) return;
+          var dt = !it.date && tParseDate(c);
+          if (dt) { it.date = dt; return; }
+          if (!it.number && /^(#|no\.?\s*)?\d{1,3}$/i.test(c)) { it.number = c.replace(/\D/g, ''); return; }
+          if (tDirWord(c)) { it.dir = tDirWord(c); return; }
+          if (/^\d{1,2}:\d{2}\s*(am|pm)?$/i.test(c)) { it.time = c; return; }
+          texts.push(c);
+        });
+        if (texts[0] && T_NONE.test(texts[0])) {
+          it.none = true;
+          it.reason = /^(no talk|none|no public talk)$/i.test(texts[0]) ? (texts[1] || 'No public talk') : texts[0];
+        } else {
+          it.speaker = texts[0] || ''; it.cong = texts[1] || '';
+          if (texts[2]) { var t2 = tSplitTalk(texts[2]); it.title = t2.title; if (t2.number && !it.number) it.number = t2.number; }
+          it.notes = texts.slice(3).join(', ');
+        }
+      }
+      if (!it.date) { bad.push({ line: r + 1, why: 'No date found', text: cells.filter(Boolean).join(', ') }); continue; }
+      if (!it.none && !it.speaker) { bad.push({ line: r + 1, why: 'No speaker', text: cells.filter(Boolean).join(', ') }); continue; }
+      items.push(it);
+    }
+    return { items: items, bad: bad };
+  }
+  function tTime24(s) {
+    var x = String(s || '').trim().match(/^(\d{1,2}):(\d{2})\s*(am|pm)?$/i); if (!x) return '';
+    var h = +x[1]; if (x[3] && /pm/i.test(x[3]) && h < 12) h += 12; if (x[3] && /am/i.test(x[3]) && h === 12) h = 0;
+    return pad(h) + ':' + x[2];
+  }
+  // Turn parsed lines into what will be saved, with a reason for anything left out.
+  function tPlanImport(text, defDir, replace) {
+    var p = tParseImport(text, defDir), plan = { ins: [], outs: [], skip: p.bad.slice() }, seenIn = {}, seenOut = {};
+    var outs = tOutAll();
+    p.items.forEach(function (it) {
+      if (it.dir === 'out') {
+        var b = tFindBro(it.speaker);
+        if (!b) return plan.skip.push({ line: it.line, why: 'Not one of our brothers', text: it.speaker });
+        var key = b.id + '|' + it.date;
+        if (seenOut[key] || outs.some(function (o) { return o.brotherId === b.id && o.date === it.date; })) return plan.skip.push({ line: it.line, why: 'Already in Embrace', text: b.name + ', ' + tShort(it.date) });
+        seenOut[key] = 1;
+        plan.outs.push({ brotherId: b.id, brotherName: b.name, toCong: it.cong || '', date: it.date, time: tTime24(it.time), number: it.number || '', title: it.title || '', notes: it.notes || '' });
+        return;
+      }
+      var wk = tWeekKey(it.date);
+      if (seenIn[wk]) return plan.skip.push({ line: it.line, why: 'Same weekend twice', text: tShort(wk) });
+      seenIn[wk] = 1;
+      var had = tFilled(tIn(wk));
+      if (had && !replace) return plan.skip.push({ line: it.line, why: 'Weekend already planned', text: tShort(wk) + ': ' + (tIn(wk).speaker || tIn(wk).reason || '') });
+      var body = { date: wk };
+      if (it.none) { body.type = 'none'; body.reason = it.reason || 'No public talk'; }
+      else {
+        var ours = tFindBro(it.speaker), home = !it.cong || tNormName(it.cong).indexOf(tNormName(tShortCong())) >= 0;
+        if (ours && home && (ours.rank === 'Elder' || ours.rank === 'Ministerial Servant')) { body.type = 'local'; body.speaker = ours.name; body.localId = ours.id; body.phone = digits(ours.phone); body.confirmed = true; }
+        else { body.type = 'visitor'; body.speaker = it.speaker.replace(/\s+/g, ' '); body.fromCong = it.cong || ''; body.phone = ''; body.confirmed = false; }
+        body.number = it.number || ''; body.title = it.title || (it.number && tTitles()[it.number]) || ''; body.notes = it.notes || '';
+      }
+      plan.ins.push({ body: body, replaces: had });
+    });
+    return plan;
+  }
+  function tImpPreviewHtml(plan) {
+    var rows = plan.ins.map(function (x) {
+      var b = x.body;
+      return '<div class="row-plain"><span style="white-space:nowrap">' + esc(tShort(b.date)) + ' · In</span><span>' + esc(b.type === 'none' ? b.reason : b.speaker + (b.type === 'local' ? ' (our speaker)' : b.fromCong ? ' (' + b.fromCong + ')' : '') + (b.number ? ' #' + b.number : '')) + (x.replaces ? ' <span class="flag">replaces</span>' : '') + '</span></div>';
+    }).concat(plan.outs.map(function (o) {
+      return '<div class="row-plain"><span style="white-space:nowrap">' + esc(tShort(o.date)) + ' · Out</span><span>' + esc(o.brotherName + (o.toCong ? ' → ' + o.toCong : '') + (o.number ? ' #' + o.number : '')) + '</span></div>';
+    }));
+    var h = rows.length ? '<h2 class="label" style="margin:16px 18px 8px">Ready to add · ' + rows.length + '</h2><div class="glass list">' + rows.join('') + '</div>' : '';
+    if (plan.skip.length) {
+      h += '<h2 class="label" style="margin:16px 18px 8px">Left out · ' + plan.skip.length + '</h2><div class="glass list">' + plan.skip.map(function (s) {
+        return '<div class="row-plain"><span class="flag">' + esc(s.why) + '</span><span>' + esc((s.text || '').slice(0, 60)) + '</span></div>';
+      }).join('') + '</div>';
+    }
+    return h;
+  }
+  function tImpRefresh() {
+    var sh = S.sheet; if (!sh || sh.type !== 't-import') return;
+    var el = document.getElementById('t-imp-text'); if (el) sh.text = el.value;
+    var rp = document.getElementById('t-imp-replace'); sh.replace = !!(rp && rp.checked);
+    var plan = tPlanImport(sh.text || '', sh.dir, sh.replace), n = plan.ins.length + plan.outs.length;
+    var pv = document.getElementById('t-imp-preview'); if (pv) pv.innerHTML = tImpPreviewHtml(plan);
+    var go = document.getElementById('t-imp-go');
+    if (go) { go.disabled = !n; go.textContent = n ? 'Add ' + n + (n === 1 ? ' talk' : ' talks') : 'Add talks'; }
+  }
+  function sheetTImport(sh) {
+    var ex = sh.dir === 'out' ? '11/15/2026, John Smith, Riverside, 172, Talk title, 1:00 PM' : '11/15/2026, John Smith, Riverside, 172, Talk title\n11/8/2026, No talk, Circuit assembly';
+    return tHead('Import Talks') +
+      '<div class="seg glass" role="group" aria-label="Import">' + [['in', 'Incoming speakers'], ['out', 'Outgoing speakers']].map(function (o) {
+        return '<button data-action="t-imp-dir" data-dir="' + o[0] + '" aria-pressed="' + (sh.dir === o[0]) + '">' + o[1] + '</button>';
+      }).join('') + '</div>' +
+      '<div class="glass"><textarea id="t-imp-text" style="min-height:170px;font-size:15px" placeholder="Paste here. One talk per line:&#10;' + esc(ex).replace(/\n/g, '&#10;') + '">' + esc(sh.text || '') + '</textarea></div>' +
+      '<p class="foot" style="text-align:left;margin-top:-8px">One talk per line: <b>date, ' + (sh.dir === 'out' ? 'our brother' : 'speaker') + ', congregation, talk number, title</b>' + (sh.dir === 'out' ? ', time' : '') +
+      '. You can copy rows straight from a spreadsheet, choose a CSV file, or paste what your meeting schedule app copies.' + (sh.dir === 'in' ? ' For a week with no talk, write <b>No talk</b> and the reason.' : '') + '</p>' +
+      '<label class="quiet glass" style="display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer">' + I.plus + ' Choose a file<input id="t-imp-file" type="file" accept=".csv,.txt,.tsv,text/csv,text/plain,*/*" hidden></label>' +
+      '<div class="glass list"><label class="field" for="t-imp-replace"><span>Replace weekends already planned</span><input class="switch" id="t-imp-replace" type="checkbox"' + (sh.replace ? ' checked' : '') + '></label></div>' +
+      '<div id="t-imp-preview"></div><button class="cta" id="t-imp-go" data-action="t-imp-go" disabled>Add talks</button>';
+  }
+  var TA_IMPORT = {
+    't-import': function (el) { var sh = { type: 't-import', dir: el.dataset.dir || (S.tPart === 'out' ? 'out' : 'in'), text: '', replace: false }; if (S.sheet) swapSheet(sh); else openSheet(sh); setTimeout(tImpRefresh, 0); },
+    't-imp-dir': function (el) { tImpRefresh(); S.sheet.dir = el.dataset.dir; renderSheet(); tImpRefresh(); },
+    't-imp-go': function () {
+      tImpRefresh();
+      var sh = S.sheet, plan = tPlanImport(sh.text || '', sh.dir, sh.replace), jobs = [], titles = Object.assign({}, tTitles()), nt = false;
+      var n = plan.ins.length + plan.outs.length; if (!n) return;
+      plan.ins.forEach(function (x) {
+        jobs.push(store.putTalk('talk_in_' + x.body.date, x.body));
+        if (x.body.number && x.body.title && titles[x.body.number] !== x.body.title) { titles[x.body.number] = x.body.title; nt = true; }
+      });
+      plan.outs.forEach(function (o, i) {
+        jobs.push(store.putTalk('talk_out_' + Date.now().toString(36) + i + Math.random().toString(36).slice(2, 6), o));
+        if (o.number && o.title && titles[o.number] !== o.title) { titles[o.number] = o.title; nt = true; }
+      });
+      if (nt) jobs.push(store.putTalk('talktitles', { map: titles }));
+      var first = plan.ins.map(function (x) { return x.body.date; }).concat(plan.outs.map(function (o) { return o.date; })).sort()[0];
+      Promise.all(jobs).then(function () {
+        closeSheet(); S.tPart = plan.ins.length ? 'year' : 'out'; if (first) S.tYear = +first.slice(0, 4); S.tScrolled = false; render();
+        toast(n + (n === 1 ? ' talk' : ' talks') + ' added');
+      }, function (e) { toast(window.EmbraceStore.friendly(e)); });
+    }
+  };
+  Object.keys(TA_IMPORT).forEach(function (k) { TA[k] = TA_IMPORT[k]; });
+
   Object.keys(TA).forEach(function (k) { A[k] = TA[k]; });
   function gateCode(c) {
     if (S.busy) return;
@@ -1451,6 +1706,7 @@
     if (t.id === 'to-num') tFillTitle('to-num', 'to-title');
     if (t.id === 'ti-title' || t.id === 'to-title') t.dataset.typed = t.value ? '1' : '';
     if (t.id === 'to-date' && S.sheet) S.sheet.date = t.value;
+    if (t.id === 't-imp-text') tImpRefresh();
     if (t.id === 'pick-search') {
       S.sheet.q = t.value;
       document.getElementById('pick-list').innerHTML = pickResults(t.value.trim().toLowerCase(), S.sheet.type === 'pick');
@@ -1474,6 +1730,12 @@
       if (num.length >= 10) store.savePublisher({ id: pid, phone: num }).then(function () { keepAsk(); renderSheet(); toast('Number saved'); });
     }
     if (t.id === 'ask-text' || t.id === 'ask-share') { keepAsk(); S.sheet[t.id === 'ask-text' ? 'text' : 'share'] = t.checked; renderSheet(); }
+    if (t.id === 't-imp-replace') tImpRefresh();
+    if (t.id === 't-imp-file' && t.files && t.files[0]) {
+      var fr = new FileReader();
+      fr.onload = function () { var ta = document.getElementById('t-imp-text'); if (ta) ta.value = String(fr.result).replace(/^\ufeff/, ''); t.value = ''; tImpRefresh(); };
+      fr.readAsText(t.files[0]);
+    }
     if (t.id === 'import-file' && t.files && t.files[0]) {
       var r = new FileReader();
       r.onload = function () {
