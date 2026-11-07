@@ -8,7 +8,7 @@
 
   var FB = 'https://www.gstatic.com/firebasejs/10.12.2/';
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
-  function blank() { return { publishers: [], visits: [], plans: [], settings: { overdueDays: 365 } }; }
+  function blank() { return { publishers: [], visits: [], plans: [], talks: {}, settings: { overdueDays: 365 } }; }
 
   /* ---------------- Preview / local store ---------------- */
   function LocalStore(seed) {
@@ -29,7 +29,7 @@
     function save() { try { localStorage.setItem(KEY, JSON.stringify(mem)); } catch (e) { /* blocked: memory only */ } }
     function emit() {
       var d = load();
-      listeners.forEach(function (cb) { cb({ publishers: d.publishers.slice(), visits: d.visits.slice(), plans: (d.plans || []).slice(), settings: d.settings }); });
+      listeners.forEach(function (cb) { cb({ publishers: d.publishers.slice(), visits: d.visits.slice(), plans: (d.plans || []).slice(), talks: Object.assign({}, d.talks || {}), settings: d.settings }); });
     }
     function commit() { save(); emit(); return Promise.resolve(); }
 
@@ -65,6 +65,8 @@
         return commit();
       },
       saveSettings: function (s) { var d = load(); d.settings = Object.assign({}, d.settings, s); return commit(); },
+      putTalk: function (id, body) { var d = load(); d.talks = d.talks || {}; d.talks[id] = Object.assign({}, body); return commit(); },
+      removeTalk: function (id) { var d = load(); d.talks = d.talks || {}; delete d.talks[id]; return commit(); },
       addPlan: function (x) { var d = load(); d.plans = d.plans || []; d.plans.push(Object.assign({ id: 'plan_' + uid(), createdAt: Date.now() }, x)); return commit(); },
       deletePlan: function (id) { var d = load(); d.plans = (d.plans || []).filter(function (x) { return x.id !== id; }); return commit(); },
       resetDemo: function () { try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ } mem = null; load(); return commit(); }
@@ -77,7 +79,7 @@
     var listeners = [], unsubs = [], data = blank(), stateCb = null, gotPublishers = false;
 
     function emit() {
-      listeners.forEach(function (cb) { cb({ publishers: data.publishers, visits: data.visits, plans: data.plans || [], settings: data.settings, ready: gotPublishers }); });
+      listeners.forEach(function (cb) { cb({ publishers: data.publishers, visits: data.visits, plans: data.plans || [], talks: data.talks || {}, settings: data.settings, ready: gotPublishers }); });
     }
     function ref(path) { return m.fs.doc.apply(null, [db].concat(path.split('/'))); }
     function col(name) { return m.fs.collection(db, name); }
@@ -94,12 +96,13 @@
       unsubs.push(m.fs.onSnapshot(col('visits'), into('visits')));
       // Settings and the shared calendar of planned visits share the "settings" collection.
       unsubs.push(m.fs.onSnapshot(col('settings'), function (snap) {
-        var st = {}, pl = [];
+        var st = {}, pl = [], tk = {};
         snap.docs.forEach(function (d) {
           if (d.id === 'app') st = d.data();
           else if (d.id.indexOf('plan_') === 0) pl.push(Object.assign({ id: d.id }, d.data()));
+          else if (d.id.indexOf('talk') === 0) tk[d.id] = d.data();   // public talk schedule (Talks tab)
         });
-        data.settings = Object.assign({ overdueDays: 365 }, st); data.plans = pl; emit();
+        data.settings = Object.assign({ overdueDays: 365 }, st); data.plans = pl; data.talks = tk; emit();
       }));
     }
 
@@ -200,7 +203,9 @@
         var id = 'plan_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
         return m.fs.setDoc(ref('settings/' + id), Object.assign({ kind: 'plan' }, x, { createdAt: m.fs.serverTimestamp() }));
       },
-      deletePlan: function (id) { return m.fs.deleteDoc(ref('settings/' + id)); }
+      deletePlan: function (id) { return m.fs.deleteDoc(ref('settings/' + id)); },
+      putTalk: function (id, body) { return m.fs.setDoc(ref('settings/' + id), Object.assign({ kind: 'talk' }, body)); },
+      removeTalk: function (id) { return m.fs.deleteDoc(ref('settings/' + id)); }
     };
   }
 

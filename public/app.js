@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '4.10';
+  var VERSION = '5.0';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -33,7 +33,7 @@
     status: 'loading', error: '', loaded: false,
     data: { publishers: [], visits: [], settings: { overdueDays: 365 } },
     tab: 'home', mode: 'priority', group: 'all', query: '',
-    pubId: null, sheet: null, hop: null, scroll: {}, open: {}, homeCal: { y: new Date().getFullYear(), m: new Date().getMonth() },
+    pubId: null, sheet: null, hop: null, scroll: {}, open: {}, homeCal: { y: new Date().getFullYear(), m: new Date().getMonth() }, tYear: new Date().getFullYear(), tPart: 'year',
     meId: null, whoAll: false, whoQuery: '', busy: false, ringDrawn: false
   };
   var idx = { byPub: {}, groups: [] };
@@ -145,6 +145,7 @@
   var I = {
     home: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 8.5a2.6 2.6 0 0 1 4.2-1.2 2.6 2.6 0 0 1 4.3.6 2.6 2.6 0 0 1 1.7 4.4 2.6 2.6 0 0 1-2.6 3.2H9.2A2.6 2.6 0 0 1 7 12.6"/><ellipse cx="5.4" cy="10.6" rx="2.4" ry="2"/><path d="M9.5 15.5v3.5M15.5 15.5v3.5"/></svg>',
     flock: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21V8a4 4 0 0 1 8 0v1.5"/><path d="M17 9.5a1.4 1.4 0 0 1-2.8 0"/></svg>',
+    talks: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 21h8M12 17v4"/><path d="M6.5 9h11l-1.5 8h-8z"/><path d="M12 3.5v3"/></svg>',
     upcoming: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/><circle cx="12" cy="15" r="1.4" fill="currentColor" stroke="none"/></svg>',
     settings: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>',
     search: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>',
@@ -380,6 +381,366 @@
   }
   function planById(id) { var l = S.data.plans || []; for (var i = 0; i < l.length; i++) if (l[i].id === id) return l[i]; return null; }
 
+  /* ---------------- Talks: public talk schedule ----------------
+     A year of weekends with the incoming speaker for each, and our brothers giving talks elsewhere.
+     Stored in the shared "settings" collection: talk_in_YYYY-MM-DD, talk_out_<id>, talktitles, talkcfg. */
+  function tDocs() { return S.data.talks || {}; }
+  function tCfg() { return Object.assign({ day: 0, time: '10:00' }, tDocs().talkcfg || {}); }
+  function tTitles() { return (tDocs().talktitles && tDocs().talktitles.map) || {}; }
+  function tCong() { return (S.data.settings && S.data.settings.congregationName) || 'Northwood Congregation'; }
+  function tShortCong() { return tCong().replace(/\s+Congregation$/i, ''); }
+  function tLast(n) { var w = words(n); return w[w.length - 1] || n; }
+  function tShort(s) { var d = parseDay(s); return MON[d.getMonth()].slice(0, 3) + ' ' + d.getDate(); }
+  function tSpeakers() {
+    return S.data.publishers.filter(function (p) { return (p.rank === 'Elder' || p.rank === 'Ministerial Servant') && !isVisitor(p); }).sort(byName);
+  }
+  function tIn(date) { return tDocs()['talk_in_' + date] || null; }
+  function tOutAll() {
+    var out = [], docs = tDocs();
+    Object.keys(docs).forEach(function (k) { if (k.indexOf('talk_out_') === 0) out.push(Object.assign({ id: k }, docs[k])); });
+    return out.sort(function (a, b) { return a.date !== b.date ? (a.date < b.date ? -1 : 1) : String(a.time || '').localeCompare(String(b.time || '')); });
+  }
+  function tWeekends(year) {
+    var d = new Date(year, 0, 1), out = [], day = tCfg().day;
+    while (d.getDay() !== day) d.setDate(d.getDate() + 1);
+    while (d.getFullYear() === year) { out.push(ymd(d)); d.setDate(d.getDate() + 7); }
+    return out;
+  }
+  function ymd(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+  // The meeting day of the Monday-to-Sunday week a date falls in.
+  function tWeekKey(s) {
+    var d = parseDay(s), back = (d.getDay() + 6) % 7;
+    d.setDate(d.getDate() - back + (tCfg().day + 6) % 7);
+    return ymd(d);
+  }
+  function tOutByWeek() {
+    var map = {};
+    tOutAll().forEach(function (o) { var k = tWeekKey(o.date); (map[k] = map[k] || []).push(o); });
+    return map;
+  }
+  function tCongs() {
+    var seen = {}, docs = tDocs();
+    Object.keys(docs).forEach(function (k) {
+      if (k.indexOf('talk_in_') === 0 && docs[k].fromCong) seen[docs[k].fromCong] = 1;
+      if (k.indexOf('talk_out_') === 0 && docs[k].toCong) seen[docs[k].toCong] = 1;
+    });
+    return Object.keys(seen).sort();
+  }
+  function tLabel(t) {
+    if (!t) return '';
+    return [t.number ? '#' + t.number : '', t.title ? '“' + t.title + '”' : ''].filter(Boolean).join(' ');
+  }
+  function tFilled(t) { return !!(t && (t.type === 'none' || t.speaker)); }
+  function tChip(date, past) {
+    var d = parseDay(date);
+    return '<span class="datechip' + (past ? ' past' : '') + '" aria-hidden="true"><small>' + MON[d.getMonth()].slice(0, 3) + '</small><b>' + d.getDate() + '</b></span>';
+  }
+  function tWeekRow(date, outs) {
+    var t = tIn(date), past = date < todayStr(), main = null, sub = [];
+    if (t && t.type === 'none') { main = t.reason || 'No public talk'; sub.push('No talk this week'); }
+    else if (t && t.speaker) {
+      main = t.speaker;
+      sub.push(tLabel(t) || 'Talk not chosen yet');
+      sub.push(t.type === 'local' ? 'Our speaker' : (t.fromCong || ''));
+      if (!t.confirmed && t.type !== 'local') sub.push('Not confirmed');
+    }
+    var away = (outs || []).map(function (o) { var b = pub(o.brotherId); return (b ? b.name : o.brotherName || 'Brother') + (o.toCong ? ' → ' + o.toCong : ''); });
+    return '<button class="cell week' + (past ? ' past' : '') + '" data-action="t-week" data-date="' + date + '">' + tChip(date, past) +
+      '<span class="txt">' + (main ? '<b>' + esc(main) + '</b>' : past ? '<b>Nothing recorded</b>' : '<b class="open">Open · needs a speaker</b>') +
+      (sub.filter(Boolean).length ? '<small>' + esc(sub.filter(Boolean).join(' · ')) + '</small>' : '') +
+      (away.length ? '<small class="out-line">Away: ' + esc(away.join(', ')) + '</small>' : '') + '</span>' +
+      (t && t.speaker && !t.confirmed && t.type !== 'local' ? '<i class="dot pend" title="Not confirmed"></i>' : '') + I.chev + '</button>';
+  }
+  function tOutRow(o) {
+    var b = pub(o.brotherId), past = o.date < todayStr();
+    return '<button class="cell' + (past ? ' past' : '') + '" data-action="t-out-edit" data-id="' + esc(o.id) + '">' + tChip(o.date, past) +
+      '<span class="txt"><b>' + esc(b ? b.name : o.brotherName || 'Brother') + '</b><small>' +
+      esc([o.toCong || 'Congregation not set', DOW[parseDay(o.date).getDay()].slice(0, 3) + (o.time ? ' ' + fmtTime(o.time) : ''), tLabel(o)].filter(Boolean).join(' · ')) +
+      '</small></span>' + I.chev + '</button>';
+  }
+
+  function viewTalks() {
+    var part = S.tPart || 'year';
+    var h = '<div class="screen"><div class="top"><h1 class="title">Talks</h1><span class="sub">Public talk schedule</span></div>' +
+      '<div class="seg glass" role="group" aria-label="Show">' + [['year', 'Year'], ['in', 'Incoming'], ['out', 'Outgoing']].map(function (o) {
+        return '<button data-action="t-part" data-part="' + o[0] + '" aria-pressed="' + (part === o[0]) + '">' + o[1] + '</button>';
+      }).join('') + '</div>';
+    if (part === 'year') h += tYearView();
+    else if (part === 'in') h += tInView();
+    else h += tOutView();
+    h += '<button class="quiet glass" data-action="t-settings">Talk settings</button>';
+    return h + '</div>';
+  }
+  function tYearView() {
+    var y = S.tYear, wk = tWeekends(y), byW = tOutByWeek(), today = todayStr();
+    var have = wk.filter(function (d) { return tFilled(tIn(d)); }).length;
+    var horizon = ymd(new Date(Date.now() + 91 * 864e5));
+    var soon = wk.filter(function (d) { return d >= today && d <= horizon && !tFilled(tIn(d)); });
+    var outCount = tOutAll().filter(function (o) { return o.date.slice(0, 4) === String(y); }).length;
+    var h = '<div class="yearbar glass"><button class="link" data-action="t-year" data-step="-1" aria-label="Previous year">' + I.left + '</button>' +
+      '<b>' + y + '</b><button class="link" data-action="t-year" data-step="1" aria-label="Next year">' + I.right + '</button></div>' +
+      '<div class="duo"><div class="glass tile" style="cursor:default"><span class="tile-label">Incoming</span><b>' + have + '<small> of ' + wk.length + '</small></b>' +
+      '<span class="bar"><i style="width:' + Math.round(have / wk.length * 100) + '%"></i></span><span class="tile-sub">weekends planned</span></div>' +
+      '<div class="glass tile" style="cursor:default"><span class="tile-label">Outgoing</span><b>' + outCount + '</b><span class="tile-sub">talks by our brothers</span></div></div>';
+    if (y === new Date().getFullYear() && soon.length) {
+      h += '<button class="cta" data-action="t-week" data-date="' + soon[0] + '">' + I.plus + 'Fill ' + esc(longDate(soon[0])) + '</button>' +
+        '<p class="foot" style="margin-top:-8px">' + soon.length + (soon.length === 1 ? ' weekend' : ' weekends') + ' in the next 3 months still need a speaker.</p>';
+    }
+    for (var m = 0; m < 12; m++) {
+      var days = wk.filter(function (d) { return +d.slice(5, 7) === m + 1; });
+      if (days.length) h += '<h2 class="label" id="tm-' + m + '">' + MON[m] + '</h2><div class="glass list">' + days.map(function (d) { return tWeekRow(d, byW[d]); }).join('') + '</div>';
+    }
+    return h + '<button class="quiet glass" data-action="t-copy">Copy the ' + y + ' schedule</button>';
+  }
+  function tInView() {
+    var today = todayStr(), y = new Date().getFullYear();
+    var list = tWeekends(y).concat(tWeekends(y + 1)).filter(function (d) { return d >= today; });
+    var planned = list.filter(function (d) { return tFilled(tIn(d)); }).slice(0, 30);
+    var open = list.filter(function (d) { return !tFilled(tIn(d)); }).slice(0, 12);
+    return '<h2 class="label">Needs a speaker</h2>' + (open.length ? '<div class="glass list">' + open.map(function (d) { return tWeekRow(d, []); }).join('') + '</div>'
+      : '<div class="glass empty"><b>All set</b><span>Every coming weekend has a speaker.</span></div>') +
+      '<h2 class="label">Coming up</h2>' + (planned.length ? '<div class="glass list">' + planned.map(function (d) { return tWeekRow(d, []); }).join('') + '</div>'
+      : '<div class="glass empty"><span>No incoming speakers planned yet.</span></div>');
+  }
+  function tOutView() {
+    var today = todayStr(), all = tOutAll();
+    var up = all.filter(function (o) { return o.date >= today; }), past = all.filter(function (o) { return o.date < today; }).reverse().slice(0, 15);
+    var h = '<button class="cta" data-action="t-out-new">' + I.plus + 'Assign an outgoing talk</button>' +
+      '<h2 class="label">Coming up</h2>' + (up.length ? '<div class="glass list">' + up.map(tOutRow).join('') + '</div>'
+      : '<div class="glass empty"><span>No outgoing talks planned yet.</span></div>');
+    if (past.length) h += '<h2 class="label">Recently given</h2><div class="glass list">' + past.map(tOutRow).join('') + '</div>';
+    return h;
+  }
+
+  function tHead(title, right, back) {
+    return '<div class="grab" aria-hidden="true"></div><div class="sheet-head"><button class="link" data-action="' + (back ? 't-back' : 'close') + '" style="justify-self:start">' + (back ? 'Cancel' : 'Close') + '</button>' +
+      '<h2 id="sheet-title">' + esc(title) + '</h2>' + (right || '<span></span>') + '</div>';
+  }
+  function sheetTWeek(date) {
+    var t = tIn(date), outs = tOutByWeek()[date] || [], c = tCfg();
+    var h = tHead(longDate(date)) + '<p class="sub" style="margin-top:-8px">' + esc(tShortCong()) + ' meeting at ' + esc(fmtTime(c.time)) + '</p><h2 class="label">Incoming</h2>';
+    if (t && t.type === 'none') {
+      h += '<div class="glass list"><div class="row-plain"><span>No public talk</span><span>' + esc(t.reason || '') + '</span></div>' +
+        '<button class="action" data-action="t-in-edit" data-date="' + date + '">Change</button></div>';
+    } else if (t && t.speaker) {
+      var num = digits(t.phone);
+      h += '<div class="glass list"><div class="row-plain"><span>Speaker</span><span>' + esc(t.speaker) + '</span></div>' +
+        '<div class="row-plain"><span>From</span><span>' + esc(t.type === 'local' ? 'Our congregation' : (t.fromCong || '—')) + '</span></div>' +
+        '<div class="row-plain"><span>Talk</span><span>' + esc(tLabel(t) || 'Not chosen yet') + '</span></div>' +
+        (t.type !== 'local' ? '<div class="row-plain"><span>Confirmed</span><span>' + (t.confirmed ? 'Yes' : '<span class="flag">Not yet</span>') + '</span></div>' : '') +
+        (num.length >= 10 ? '<div class="row-plain"><span>Phone</span><span>' + esc(fmtPhone(num)) + '</span></div>' : '') +
+        (t.notes ? '<div class="row-plain" style="white-space:pre-wrap"><span>Notes</span><span>' + esc(t.notes) + '</span></div>' : '') +
+        '<button class="action" data-action="t-in-edit" data-date="' + date + '">Edit</button>' +
+        (num.length >= 10 ? '<button class="action" data-action="t-in-text" data-date="' + date + '">Text ' + esc(t.type === 'local' ? firstName(t.speaker) : 'Brother ' + tLast(t.speaker)) + ' to confirm</button>' : '') + '</div>';
+    } else {
+      h += '<button class="cta" data-action="t-in-edit" data-date="' + date + '">' + I.plus + 'Assign the speaker</button>';
+    }
+    return h + '<h2 class="label">Our brothers away</h2>' + (outs.length ? '<div class="glass list">' + outs.map(tOutRow).join('') + '</div>' : '') +
+      '<button class="quiet glass" data-action="t-out-new" data-date="' + date + '">' + I.plus + ' Add an outgoing talk</button>';
+  }
+  function sheetTIn(sh) {
+    var t = tIn(sh.date) || {}, kind = sh.kind, cs = tCongs();
+    var h = tHead(tShort(sh.date) + ' · Incoming', '<button class="link" data-action="t-in-save">Save</button>', true) +
+      '<div class="seg glass" role="group" aria-label="Kind">' + [['visitor', 'Visiting'], ['local', 'Our speaker'], ['none', 'No talk']].map(function (o) {
+        return '<button data-action="t-in-kind" data-kind="' + o[0] + '" aria-pressed="' + (kind === o[0]) + '">' + o[1] + '</button>';
+      }).join('') + '</div>';
+    if (kind === 'none') {
+      h += '<div class="glass list"><div class="field"><label for="ti-reason">Why</label><input id="ti-reason" type="text" list="t-reasons" value="' + esc(t.reason || '') + '" placeholder="e.g. Circuit assembly"></div></div>' +
+        '<datalist id="t-reasons"><option value="Circuit overseer visit"></option><option value="Circuit assembly"></option><option value="Regional convention"></option><option value="Memorial week"></option><option value="Special talk"></option></datalist>';
+    } else {
+      if (kind === 'local') {
+        h += '<h2 class="label">Which brother?</h2><div class="glass"><div class="chips">' + tSpeakers().map(function (b) {
+          return '<button class="chip" data-action="t-in-local" data-id="' + esc(b.id) + '" aria-pressed="' + (sh.localId === b.id) + '">' + esc(b.name) + '</button>';
+        }).join('') + '</div></div>';
+      }
+      var vis = kind === 'visitor';
+      h += '<div class="glass list">' +
+        (vis ? '<div class="field"><label for="ti-speaker">Speaker</label><input id="ti-speaker" type="text" value="' + esc(t.type === 'visitor' ? t.speaker || '' : '') + '" placeholder="Full name" autocomplete="off"></div>' +
+          '<div class="field"><label for="ti-cong">From</label><input id="ti-cong" type="text" list="t-congs" value="' + esc(t.fromCong || '') + '" placeholder="Congregation"></div>' : '') +
+        '<div class="field"><label for="ti-num">Talk number</label><input id="ti-num" type="text" inputmode="numeric" value="' + esc(t.number || '') + '" placeholder="#" style="max-width:120px"></div>' +
+        '<div class="field"><label for="ti-title">Title</label><input id="ti-title" type="text" value="' + esc(t.title || '') + '" placeholder="Talk title"></div>' +
+        (vis ? '<div class="field"><label for="ti-phone">Phone</label><input id="ti-phone" type="text" inputmode="tel" value="' + esc(fmtPhone(t.phone || '')) + '" placeholder="(419) 555-1234"></div>' +
+          '<label class="field" for="ti-ok"><span>Confirmed</span><input class="switch" id="ti-ok" type="checkbox"' + (t.confirmed ? ' checked' : '') + '></label>' : '') + '</div>' +
+        '<h2 class="label"><label for="ti-notes">Notes</label></h2><div class="glass"><textarea id="ti-notes" style="min-height:90px" placeholder="Hospitality, who is hosting lunch, anything to remember">' + esc(t.notes || '') + '</textarea></div>' +
+        '<datalist id="t-congs">' + cs.map(function (c) { return '<option value="' + esc(c) + '"></option>'; }).join('') + '</datalist>';
+    }
+    h += '<p class="err" id="ti-err" role="alert" hidden></p><button class="cta" data-action="t-in-save">Save</button>';
+    if (tIn(sh.date)) {
+      h += sh.confirm ? '<div class="glass list"><div class="row-plain"><span>Clear this weekend?</span></div><button class="action red" data-action="t-in-delete">Clear</button><button class="action" data-action="t-unconfirm">Keep</button></div>'
+        : '<button class="quiet red" data-action="t-confirm">Clear this weekend</button>';
+    }
+    return h;
+  }
+  function sheetTOut(sh) {
+    var o = sh.id ? tDocs()[sh.id] || {} : {}, cs = tCongs(), wk = tWeekKey(sh.date || o.date || todayStr());
+    var h = tHead(sh.id ? 'Outgoing Talk' : 'New Outgoing Talk', '<button class="link" data-action="t-out-save">Save</button>', true) +
+      '<h2 class="label">Which brother?</h2><div class="glass"><div class="chips">' + tSpeakers().map(function (b) {
+        return '<button class="chip" data-action="t-out-bro" data-id="' + esc(b.id) + '" aria-pressed="' + (sh.brotherId === b.id) + '">' + esc(b.name) + '</button>';
+      }).join('') + '</div></div>';
+    if (sh.brotherId) {
+      var clash = tOutAll().some(function (x) { return x.id !== sh.id && x.brotherId === sh.brotherId && tWeekKey(x.date) === wk; });
+      var home = tIn(wk); home = home && home.type === 'local' && home.localId === sh.brotherId;
+      if (clash || home) h += '<p class="err" style="margin:0">' + (clash ? 'He already has an outgoing talk that weekend.' : 'He is giving the talk here that weekend.') + '</p>';
+    }
+    h += '<div class="glass list">' +
+      '<div class="field"><label for="to-cong">Congregation</label><input id="to-cong" type="text" list="t-congs" value="' + esc(o.toCong || '') + '" placeholder="Where he is going"></div>' +
+      '<div class="field"><label for="to-date">Date</label><input id="to-date" type="date" value="' + esc(sh.date || o.date || '') + '" style="height:42px;border:none;background:transparent;font-size:17px;color:var(--fg)"></div>' +
+      '<div class="field"><label for="to-time">Time</label><input id="to-time" type="time" value="' + esc(o.time || '') + '" style="height:42px;border:none;background:transparent;font-size:17px;color:var(--fg)"></div>' +
+      '<div class="field"><label for="to-num">Talk number</label><input id="to-num" type="text" inputmode="numeric" value="' + esc(o.number || '') + '" placeholder="#" style="max-width:120px"></div>' +
+      '<div class="field"><label for="to-title">Title</label><input id="to-title" type="text" value="' + esc(o.title || '') + '" placeholder="Talk title"></div></div>' +
+      '<h2 class="label"><label for="to-notes">Address and notes</label></h2><div class="glass"><textarea id="to-notes" style="min-height:90px" placeholder="Kingdom Hall address, who to contact">' + esc(o.notes || '') + '</textarea></div>' +
+      '<datalist id="t-congs">' + cs.map(function (c) { return '<option value="' + esc(c) + '"></option>'; }).join('') + '</datalist>' +
+      '<p class="err" id="to-err" role="alert" hidden></p><button class="cta" data-action="t-out-save">Save</button>';
+    if (sh.id) {
+      var b = pub(o.brotherId);
+      if (b && digits(b.phone).length >= 10) h += '<button class="quiet glass" data-action="t-out-text">' + I.chat + ' Text ' + esc(firstName(b.name)) + ' a reminder</button>';
+      h += sh.confirm ? '<div class="glass list"><div class="row-plain"><span>Remove this talk?</span></div><button class="action red" data-action="t-out-delete">Remove</button><button class="action" data-action="t-unconfirm">Keep</button></div>'
+        : '<button class="quiet red" data-action="t-confirm">Remove</button>';
+    }
+    return h;
+  }
+  function sheetTSettings() {
+    var c = tCfg(), n = Object.keys(tTitles()).length;
+    return tHead('Talk Settings') +
+      '<div class="glass list"><div style="padding:12px 18px;display:flex;flex-direction:column;gap:8px"><span>Public meeting day</span><div class="seg" role="group" aria-label="Meeting day">' +
+      [[6, 'Saturday'], [0, 'Sunday']].map(function (o) { return '<button data-action="t-day" data-day="' + o[0] + '" aria-pressed="' + (c.day === o[0]) + '">' + o[1] + '</button>'; }).join('') + '</div></div>' +
+      '<div class="field"><label for="t-time">Meeting time</label><input id="t-time" type="time" value="' + esc(c.time) + '" style="height:42px;border:none;background:transparent;font-size:17px;color:var(--fg)"></div></div>' +
+      '<h2 class="label">Talk titles · ' + n + ' saved</h2><div class="glass"><textarea id="t-titles" style="min-height:200px" placeholder="One talk per line, number first:&#10;1 First title&#10;2 Second title"></textarea></div>' +
+      '<p class="foot" style="text-align:left;margin-top:-8px">Paste your list of talk outlines here. After that, typing a talk number fills in its title.</p>' +
+      '<p class="err" id="ts-err" role="alert" hidden></p><button class="cta" data-action="t-titles-save">Save titles</button>';
+  }
+  function tScheduleText(y) {
+    var c = tCfg(), byW = tOutByWeek(), lines = [tCong() + ' public talks ' + y, ''];
+    tWeekends(y).forEach(function (d) {
+      var t = tIn(d), line = tShort(d) + ': ';
+      if (t && t.type === 'none') line += t.reason || 'No public talk';
+      else if (t && t.speaker) line += t.speaker + (t.type !== 'local' && t.fromCong ? ' (' + t.fromCong + ')' : '') + (tLabel(t) ? ' ' + tLabel(t) : '');
+      else line += 'Open';
+      (byW[d] || []).forEach(function (o) { var b = pub(o.brotherId); line += '\n    Away: ' + (b ? b.name : 'Brother') + (o.toCong ? ' at ' + o.toCong : ''); });
+      lines.push(line);
+    });
+    return lines.join('\n') + '\n\nMeeting at ' + fmtTime(c.time) + '.';
+  }
+  function sheetTCopy(y) {
+    return tHead(y + ' Schedule') + '<div class="glass"><textarea id="t-copy-text" readonly style="min-height:320px;font-size:15px">' + esc(tScheduleText(y)) + '</textarea></div>' +
+      '<button class="cta" data-action="t-copy-now">Copy</button>';
+  }
+  // Keep typed values when an edit card redraws (choosing a kind or a brother).
+  function tKeep() {
+    var sh = S.sheet; if (!sh) return;
+    sh.kept = sh.kept || {};
+    ['ti-speaker', 'ti-cong', 'ti-num', 'ti-title', 'ti-phone', 'ti-notes', 'ti-reason', 'to-cong', 'to-date', 'to-time', 'to-num', 'to-title', 'to-notes'].forEach(function (i) {
+      var el = document.getElementById(i); if (el) sh.kept[i] = el.value;
+    });
+    var ok = document.getElementById('ti-ok'); if (ok) sh.kept['ti-ok'] = ok.checked;
+  }
+  function tRestore() {
+    var k = S.sheet && S.sheet.kept; if (!k) return;
+    Object.keys(k).forEach(function (i) { var el = document.getElementById(i); if (!el) return; if (el.type === 'checkbox') el.checked = k[i]; else el.value = k[i]; });
+  }
+  function tRedraw() { tKeep(); renderSheet(); tRestore(); }
+  function tVal(id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; }
+  function tSaveTitle(num, title) {
+    var map = tTitles();
+    if (!num || !title || map[num] === title) return Promise.resolve();
+    var next = Object.assign({}, map); next[num] = title;
+    return store.putTalk('talktitles', { map: next });
+  }
+  function tFillTitle(numId, titleId) {
+    var t = tTitles()[tVal(numId).replace(/\D/g, '')], el = document.getElementById(titleId);
+    if (t && el && !el.dataset.typed) el.value = t;
+  }
+  function tBack() { var b = S.sheet && S.sheet.back; if (b) swapSheet(b); else closeSheet(); }
+  var TA = {
+    't-part': function (el) { S.tPart = el.dataset.part; render(); },
+    't-year': function (el) { S.tYear += +el.dataset.step; render(); },
+    't-week': function (el) { openSheet({ type: 't-week', date: el.dataset.date }); },
+    't-back': function () { tBack(); },
+    't-confirm': function () { S.sheet.confirm = true; tRedraw(); },
+    't-unconfirm': function () { S.sheet.confirm = false; tRedraw(); },
+    't-settings': function () { openSheet({ type: 't-settings' }); },
+    't-in-edit': function (el) {
+      var t = tIn(el.dataset.date) || {}, sh = { type: 't-in', date: el.dataset.date, kind: t.type || 'visitor', localId: t.localId || '', back: S.sheet && S.sheet.type === 't-week' ? S.sheet : null };
+      if (S.sheet) swapSheet(sh); else openSheet(sh);
+    },
+    't-in-kind': function (el) { S.sheet.kind = el.dataset.kind; tRedraw(); },
+    't-in-local': function (el) { S.sheet.localId = el.dataset.id; tRedraw(); },
+    't-in-save': function () {
+      var sh = S.sheet, body = { type: sh.kind, date: sh.date };
+      if (sh.kind === 'none') body.reason = tVal('ti-reason') || 'No public talk';
+      else {
+        if (sh.kind === 'local') {
+          var b = pub(sh.localId);
+          if (!b) return showErr('ti-err', 'Tap the brother giving the talk.');
+          body.speaker = b.name; body.localId = b.id; body.phone = digits(b.phone); body.confirmed = true;
+        } else {
+          body.speaker = tVal('ti-speaker').replace(/\s+/g, ' ');
+          if (!body.speaker) return showErr('ti-err', 'Type the speaker\'s name.');
+          body.fromCong = tVal('ti-cong'); body.phone = digits(tVal('ti-phone'));
+          body.confirmed = !!(document.getElementById('ti-ok') || {}).checked;
+        }
+        body.number = tVal('ti-num').replace(/\D/g, ''); body.title = tVal('ti-title'); body.notes = tVal('ti-notes');
+      }
+      store.putTalk('talk_in_' + sh.date, body).then(function () { return tSaveTitle(body.number, body.title); })
+        .then(function () { tBack(); toast('Saved'); }, function (e) { showErr('ti-err', window.EmbraceStore.friendly(e)); });
+    },
+    't-in-delete': function () { store.removeTalk('talk_in_' + S.sheet.date).then(function () { tBack(); toast('Weekend cleared'); }); },
+    't-in-text': function (el) {
+      var t = tIn(el.dataset.date), m = me(); if (!t) return;
+      var body = (t.type === 'local' ? 'Hi ' + firstName(t.speaker) : 'Hi Brother ' + tLast(t.speaker)) + ', ' +
+        (m && t.type !== 'local' ? 'this is ' + m.name + ' from the ' + tCong() + '. ' : '') +
+        'Just confirming your public talk' + (t.type === 'local' ? '' : ' with us') + ' on ' + longDate(t.date) + ' at ' + fmtTime(tCfg().time) +
+        (tLabel(t) ? ': ' + tLabel(t) : '') + '. Thank you!' + (m && t.type === 'local' ? ' - ' + firstName(m.name) : '');
+      window.location.href = smsLink([digits(t.phone)], body);
+    },
+    't-out-new': function (el) {
+      var sh = { type: 't-out', id: null, date: el.dataset.date || '', brotherId: '', back: S.sheet && S.sheet.type === 't-week' ? S.sheet : null };
+      if (S.sheet) swapSheet(sh); else openSheet(sh);
+    },
+    't-out-edit': function (el) {
+      var o = tDocs()[el.dataset.id] || {}, sh = { type: 't-out', id: el.dataset.id, date: o.date, brotherId: o.brotherId || '', back: S.sheet && S.sheet.type === 't-week' ? S.sheet : null };
+      if (S.sheet) swapSheet(sh); else openSheet(sh);
+    },
+    't-out-bro': function (el) { S.sheet.brotherId = el.dataset.id; tRedraw(); },
+    't-out-save': function () {
+      var sh = S.sheet, b = pub(sh.brotherId), date = tVal('to-date');
+      if (!b) return showErr('to-err', 'Tap the brother giving the talk.');
+      if (!date) return showErr('to-err', 'Pick the date.');
+      var body = { brotherId: b.id, brotherName: b.name, toCong: tVal('to-cong'), date: date, time: tVal('to-time'),
+        number: tVal('to-num').replace(/\D/g, ''), title: tVal('to-title'), notes: tVal('to-notes') };
+      store.putTalk(sh.id || 'talk_out_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), body)
+        .then(function () { return tSaveTitle(body.number, body.title); })
+        .then(function () { tBack(); toast('Saved'); }, function (e) { showErr('to-err', window.EmbraceStore.friendly(e)); });
+    },
+    't-out-delete': function () { store.removeTalk(S.sheet.id).then(function () { tBack(); toast('Removed'); }); },
+    't-out-text': function () {
+      var o = tDocs()[S.sheet.id], b = o && pub(o.brotherId), m = me(); if (!b) return;
+      var body = 'Hi ' + firstName(b.name) + ', reminder: your public talk' + (tLabel(o) ? ' ' + tLabel(o) : '') + (o.toCong ? ' at ' + o.toCong : '') +
+        ' is on ' + longDate(o.date) + (o.time ? ' at ' + fmtTime(o.time) : '') + '.' + (o.notes ? ' ' + o.notes : '') + ' Thank you!' + (m ? ' - ' + firstName(m.name) : '');
+      window.location.href = smsLink([digits(b.phone)], body);
+    },
+    't-day': function (el) {
+      var c = tCfg(); c.day = +el.dataset.day;
+      store.putTalk('talkcfg', { day: c.day, time: c.time }).then(function () { renderSheet(); });
+    },
+    't-titles-save': function () {
+      var map = Object.assign({}, tTitles()), n = 0;
+      tVal('t-titles').split(/\r?\n/).forEach(function (line) {
+        var mm = /^\s*#?(\d{1,3})[\s.:)\-–]+(.+?)\s*$/.exec(line);
+        if (mm) { map[String(+mm[1])] = mm[2].replace(/^["“]|["”]$/g, ''); n++; }
+      });
+      if (!n) return showErr('ts-err', 'Put the talk number first on each line, then the title.');
+      store.putTalk('talktitles', { map: map }).then(function () { renderSheet(); toast(n + (n === 1 ? ' title saved' : ' titles saved')); });
+    },
+    't-copy': function () { openSheet({ type: 't-copy', year: S.tYear }); },
+    't-copy-now': function () {
+      var ta = document.getElementById('t-copy-text');
+      var sel = function () { ta.focus(); ta.select(); toast('Selected. Use Copy from your menu.'); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(ta.value).then(function () { toast('Copied'); }, sel);
+      else sel();
+    }
+  };
+
   /* ---------------- main views ---------------- */
   function viewHome() {
     var m = me(), cong = (S.data.settings && S.data.settings.congregationName) || 'Northwood Congregation';
@@ -595,7 +956,7 @@
   }
 
   function tabs() {
-    return '<div class="tabs"><nav aria-label="Main">' + [['home', 'Home'], ['flock', 'Flock'], ['upcoming', 'Upcoming'], ['settings', 'Settings']].map(function (t) {
+    return '<div class="tabs"><nav aria-label="Main">' + [['home', 'Home'], ['flock', 'Flock'], ['upcoming', 'Upcoming'], ['settings', 'Settings'], ['talks', 'Talks']].map(function (t) {
       return '<button data-action="tab" data-tab="' + t[0] + '"' + (S.tab === t[0] ? ' aria-current="page"' : '') + (S.hop === t[0] ? ' class="hop"' : '') + '>' + I[t[0]] + t[1] + '</button>';
     }).join('') + '</nav></div>';
   }
@@ -774,9 +1135,14 @@
     else {
       var p = S.pubId ? pub(S.pubId) : null;
       if (S.pubId && !p) S.pubId = null;
-      $main.innerHTML = p ? viewPerson(p) : S.tab === 'home' ? viewHome() : S.tab === 'flock' ? viewFlock() : S.tab === 'upcoming' ? viewUpcoming() : viewSettings();
+      $main.innerHTML = p ? viewPerson(p) : S.tab === 'home' ? viewHome() : S.tab === 'flock' ? viewFlock() : S.tab === 'upcoming' ? viewUpcoming() : S.tab === 'talks' ? viewTalks() : viewSettings();
       $tabs.innerHTML = tabs();
       S.hop = null;
+      if (!p && S.tab === 'talks' && (S.tPart || 'year') === 'year' && !S.tScrolled && S.tYear === new Date().getFullYear()) {
+        S.tScrolled = true;
+        var tm = document.getElementById('tm-' + new Date().getMonth());
+        if (tm && new Date().getMonth() > 0 && tm.scrollIntoView) setTimeout(function () { tm.scrollIntoView({ block: 'start' }); window.scrollBy(0, -12); }, 60);
+      }
       if (!p && S.tab === 'home') drawRing();
     }
     if (keep) { var el = document.getElementById(keep[0]); if (el) { el.focus(); try { el.setSelectionRange(keep[1], keep[1]); } catch (e) { /* ignore */ } } }
@@ -791,6 +1157,11 @@
     else if (sh.type === 'status') body = sheetStatus(sh.st);
     else if (sh.type === 'group') body = sheetGroup(sh.g);
     else if (sh.type === 'ask') body = sheetAsk();
+    else if (sh.type === 't-week') body = sheetTWeek(sh.date);
+    else if (sh.type === 't-in') body = sheetTIn(sh);
+    else if (sh.type === 't-out') body = sheetTOut(sh);
+    else if (sh.type === 't-settings') body = sheetTSettings();
+    else if (sh.type === 't-copy') body = sheetTCopy(sh.year);
     else if (sh.type === 'plan') { var pl = planById(sh.id); if (!pl) return closeSheet(); body = sheetPlan(pl); }
     else if (sh.type === 'visits') body = sheetAllVisits();
     else if (sh.type === 'edit') body = sheetEdit(sh.id ? pub(sh.id) : null);
@@ -1051,6 +1422,7 @@
     'cancel-reset': function () { S.confirmReset = false; render(); },
     'do-reset': function () { S.confirmReset = false; S.meId = null; S.ringDrawn = false; lsSet('embrace-me', null); store.resetDemo().then(function () { render(); }); }
   };
+  Object.keys(TA).forEach(function (k) { A[k] = TA[k]; });
   function gateCode(c) {
     if (S.busy) return;
     S.busy = true;
@@ -1075,6 +1447,10 @@
     if (t.id === 'ask-search') { S.sheet.q = t.value; document.getElementById('ask-results').innerHTML = askResults(); }
     if (t.id === 'ask-msg') { S.sheet.edited = true; S.sheet.msg = t.value; }
     if (t.id === 'ask-time') { S.sheet.time = t.value; refreshMsg(); }
+    if (t.id === 'ti-num') tFillTitle('ti-num', 'ti-title');
+    if (t.id === 'to-num') tFillTitle('to-num', 'to-title');
+    if (t.id === 'ti-title' || t.id === 'to-title') t.dataset.typed = t.value ? '1' : '';
+    if (t.id === 'to-date' && S.sheet) S.sheet.date = t.value;
     if (t.id === 'pick-search') {
       S.sheet.q = t.value;
       document.getElementById('pick-list').innerHTML = pickResults(t.value.trim().toLowerCase(), S.sheet.type === 'pick');
@@ -1091,6 +1467,7 @@
     if (t.id === 'group-pick') { S.group = t.value; saveUi(); render(); }
     if (t.id === 's-cong') store.saveSettings({ congregationName: t.value.trim() });
     if (t.id === 's-od') store.saveSettings({ overdueDays: +t.value });
+    if (t.id === 't-time') { var tc = tCfg(); store.putTalk('talkcfg', { day: tc.day, time: t.value || '10:00' }).then(function () { toast('Saved'); }); }
     if (t.id === 's-phone' && me()) store.savePublisher({ id: S.meId, phone: digits(t.value) }).then(function () { toast('Saved'); });
     if (t.classList && t.classList.contains('ask-phone')) {
       var num = digits(t.value), pid = t.dataset.pid;
@@ -1266,13 +1643,13 @@
     if (st.status === 'ready' && !subscribed) {
       subscribed = true;
       store.subscribe(function (d) {
-        S.data = { publishers: d.publishers.map(norm), visits: d.visits, settings: d.settings, plans: d.plans || [] };
+        S.data = { publishers: d.publishers.map(norm), visits: d.visits, settings: d.settings, plans: d.plans || [], talks: d.talks || {} };
         S.loaded = d.ready !== false; rebuild();
         if (S.meId && S.loaded && !pub(S.meId)) { S.meId = null; lsSet('embrace-me', null); }
         render();
         applyPendingPhones();
         applyPendingPerson();
-        if (S.sheet && (S.sheet.type === 'visit' || S.sheet.type === 'status' || S.sheet.type === 'group' || S.sheet.type === 'plan')) renderSheet();
+        if (S.sheet && (S.sheet.type === 'visit' || S.sheet.type === 'status' || S.sheet.type === 'group' || S.sheet.type === 'plan' || S.sheet.type === 't-week' || S.sheet.type === 't-settings')) renderSheet();
       });
     }
     render();
