@@ -69,6 +69,12 @@
       removeTalk: function (id) { var d = load(); d.talks = d.talks || {}; delete d.talks[id]; return commit(); },
       addPlan: function (x) { var d = load(); d.plans = d.plans || []; d.plans.push(Object.assign({ id: 'plan_' + uid(), createdAt: Date.now() }, x)); return commit(); },
       deletePlan: function (id) { var d = load(); d.plans = (d.plans || []).filter(function (x) { return x.id !== id; }); return commit(); },
+      completePlan: function (id, list) {
+        var d = load();
+        list.forEach(function (v) { d.visits = d.visits.filter(function (o) { return o.id !== v.id; }); d.visits.push(Object.assign({ createdAt: Date.now() }, v)); });
+        d.plans = (d.plans || []).filter(function (x) { return x.id !== id; });
+        return commit();
+      },
       resetDemo: function () { try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ } mem = null; load(); return commit(); }
     };
   }
@@ -204,6 +210,12 @@
         return m.fs.setDoc(ref('settings/' + id), Object.assign({ kind: 'plan' }, x, { createdAt: m.fs.serverTimestamp() }));
       },
       deletePlan: function (id) { return m.fs.deleteDoc(ref('settings/' + id)); },
+      completePlan: function (id, list) {
+        var b = m.fs.writeBatch(db);
+        list.forEach(function (v) { var body = Object.assign({}, v, { createdAt: m.fs.serverTimestamp() }); delete body.id; b.set(ref('visits/' + v.id), body); });
+        b.delete(ref('settings/' + id));
+        return b.commit();
+      },
       putTalk: function (id, body) { return m.fs.setDoc(ref('settings/' + id), Object.assign({ kind: 'talk' }, body)); },
       removeTalk: function (id) { return m.fs.deleteDoc(ref('settings/' + id)); }
     };

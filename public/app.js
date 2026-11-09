@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '5.2';
+  var VERSION = '5.3';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -378,6 +378,34 @@
       ? '<div class="glass list"><div class="row-plain"><span>Take this off the calendar?</span></div><button class="action red" data-action="plan-delete" data-id="' + esc(x.id) + '">Remove</button><button class="action" data-action="unconfirm">Keep it</button></div>'
       : '<button class="quiet red" data-action="confirm">Remove from calendar</button>';
     return h;
+  }
+  /* A planned visit counts as done once its day is over (or an hour after its time today):
+     each person on it gets the visit, from whoever planned it and went along, and it leaves the calendar.
+     Visit records use fixed ids so two phones doing this at the same moment save the same thing once. */
+  var finishing = {};
+  function finishPastPlans() {
+    if (!S.loaded || !S.data.publishers.length) return;
+    var today = todayStr(), now = new Date(), hm = pad(now.getHours()) + ':' + pad(now.getMinutes());
+    (S.data.plans || []).forEach(function (x) {
+      if (finishing[x.id] || !x.date) return;
+      var over = x.date < today;
+      if (!over && x.date === today && x.time) { var p = x.time.split(':'), h = +p[0] + 1; over = hm >= pad(h) + ':' + (p[1] || '00') && h < 24; }
+      if (!over) return;
+      finishing[x.id] = true;
+      var ids = [x.by].concat(x.withIds || []).filter(function (v, i, l) { return v && l.indexOf(v) === i; });
+      var names = ids.map(function (id) { var e = pub(id); return e ? e.name : ''; }).filter(Boolean);
+      if (!names.length) names = [x.byName].concat(x.withNames || []).filter(Boolean);
+      var near = function (pid) {
+        return S.data.visits.some(function (v) { return v.publisherId === pid && Math.abs(parseDay(v.date) - parseDay(x.date)) <= 3 * 864e5; });
+      };
+      var list = (x.visitIds || []).map(pub).filter(Boolean).filter(function (p) { return !near(p.id); }).map(function (p) {
+        return { id: x.id + '_' + p.id, publisherId: p.id, publisherName: p.name, date: x.date, elders: names, elderIds: ids,
+          notes: '', followUp: false, by: x.by || '', fromPlan: true };
+      });
+      store.completePlan(x.id, list).then(function () {
+        if (list.length) toast(list.length === 1 ? firstName(list[0].publisherName) + '’s visit from the calendar is recorded' : list.length + ' visits from the calendar recorded');
+      }, function () { finishing[x.id] = false; });
+    });
   }
   function planById(id) { var l = S.data.plans || []; for (var i = 0; i < l.length; i++) if (l[i].id === id) return l[i]; return null; }
 
@@ -851,7 +879,7 @@
   }
 
   function viewPerson(p) {
-    var vs = idx.byPub[p.id] || [], l = vs[0], w = l ? daysSince(l.date) : null, st = homeState(p);
+    var sb = shepherdingBy(p), vs = idx.byPub[p.id] || [], l = vs[0], w = l ? daysSince(l.date) : null, st = homeState(p);
     var t = titles(p);
     var sub = (t.length ? t : ['Publisher']).concat(p.group ? [p.group + ' group'] : []).join(' · ');
     var frac = w === null ? 1 : Math.min(1, Math.max(0.02, w / od()));
@@ -868,9 +896,33 @@
       (digits(p.phone).length >= 10 ? '<div class="duo"><a class="pill-search glass" href="tel:' + digits(p.phone) + '" style="text-decoration:none;color:var(--accent);font-weight:600;justify-content:center">' + I.phone + 'Call</a>' +
         '<a class="pill-search glass" href="sms:' + digits(p.phone) + '" style="text-decoration:none;color:var(--accent);font-weight:600;justify-content:center">' + I.chat + 'Text</a></div>' +
         '<p class="foot" style="margin-top:-8px">' + esc(fmtPhone(p.phone)) + '</p>' : '') +
-      (vs.length ? '<div class="glass list"><div class="card-head"><h2>Visits</h2></div>' + vs.map(function (v) { return noteRow(v, false); }).join('') + '</div>'
+      sb +
+      (vs.length ? '<div class="glass list"><div class="card-head"><h2>' + (sb ? 'Visits to ' + esc(firstName(p.name)) : 'Visits') + '</h2></div>' + vs.map(function (v) { return noteRow(v, false); }).join('') + '</div>'
         : '<div class="glass empty"><span>No visits yet.</span></div>') +
       '<p class="foot">Notes are seen only by the elders.</p></div>';
+  }
+
+  // The shepherding visits a brother has gone on (and has planned), newest first.
+  function shepherdingBy(p) {
+    var lname = p.name.toLowerCase();
+    var mine = S.data.visits.filter(function (v) {
+      return (v.elderIds || []).indexOf(p.id) >= 0 || (v.elders || []).some(function (n) { return String(n).toLowerCase() === lname; });
+    }).sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
+    var planned = plans().filter(function (x) { return x.by === p.id || (x.withIds || []).indexOf(p.id) >= 0; });
+    var brother = p.rank === 'Elder' || p.rank === 'Ministerial Servant';
+    if (!brother && !mine.length && !planned.length) return '';
+    var people = {}; mine.forEach(function (v) { people[v.publisherId] = 1; });
+    var yearAgo = ymd(new Date(Date.now() - 365 * 864e5)), year = mine.filter(function (v) { return v.date >= yearAgo; }).length;
+    var h = '<div class="glass list"><div class="card-head"><h2>Shepherding visits ' + esc(firstName(p.name)) + ' went on</h2></div>';
+    h += mine.length ? '<div class="row-plain"><span>' + mine.length + (mine.length === 1 ? ' visit' : ' visits') + ' · ' + Object.keys(people).length + (Object.keys(people).length === 1 ? ' person' : ' people') + '</span><span>' + year + ' in the last year</span></div>' : '';
+    h += planned.map(function (x) {
+      return '<button class="note" data-action="plan" data-id="' + esc(x.id) + '"><span class="top2"><b>' + esc((x.visitNames || []).join(', ') || 'Shepherding visit') + '</b><span><span class="flag">Planned</span> ' + esc(fmtDate(x.date, true)) + '</span></span>' +
+        '<span class="who">' + esc([x.byName].concat(x.withNames || []).filter(Boolean).join(' & ')) + '</span></button>';
+    }).join('');
+    h += mine.slice(0, 40).map(function (v) { return noteRow(v, true); }).join('');
+    if (mine.length > 40) h += '<div class="row-plain"><span>and ' + (mine.length - 40) + ' older visits</span></div>';
+    if (!mine.length && !planned.length) h += '<div class="row-plain"><span style="color:var(--fg2)">None recorded yet.</span></div>';
+    return h + '</div>';
   }
 
   function viewUpcoming() {
@@ -1197,7 +1249,6 @@
     if (S.sheet) { S.sheet = null; renderSheet(); if (!PREVIEW && layers > 0) { layers--; try { history.replaceState({ embrace: layers }, ''); } catch (e) { /* ignore */ } } }
     var was = !!S.pubId;
     if (!S.pubId) S.scroll[S.tab] = window.scrollY;
-    if (S.tab === 'settings') S.tab = 'flock';
     S.pubId = id; render(); window.scrollTo(0, 0);
     if (!was) push();
   }
@@ -1945,6 +1996,33 @@
     });
   }
 
+  /* ---------------- staying up to date ----------------
+     Phones keep Embrace paused in the background, so it may not reload on its own.
+     Whenever it comes back to the screen (and once at start), ask the site which version is current;
+     if it's newer, reload quietly (never while a card is open, and only once per version). */
+  var lastCheck = 0;
+  function checkForUpdate() {
+    if (window.EMBRACE_PREVIEW || !window.fetch || Date.now() - lastCheck < 20000) return;
+    lastCheck = Date.now();
+    fetch('index.html?check=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : ''; }).then(function (html) {
+      var m = html.match(/app\.js\?v=([\w.\-]+)/), v = m && m[1];
+      if (!v || v === VERSION) return;
+      var tried = null; try { tried = sessionStorage.getItem('embrace-reload'); } catch (e) { /* ignore */ }
+      if (tried === v) return;
+      var go = function () {
+        try { sessionStorage.setItem('embrace-reload', v); sessionStorage.setItem('embrace-updated', v); } catch (e) { /* ignore */ }
+        location.reload();
+      };
+      if (!S.sheet) go(); else { var wait = setInterval(function () { if (!S.sheet) { clearInterval(wait); go(); } }, 1500); }
+    }, function () { /* offline: try again next time */ });
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') { checkForUpdate(); if (S.loaded) { finishPastPlans(); render(); } }
+  });
+  window.addEventListener('focus', checkForUpdate);
+  setTimeout(checkForUpdate, 4000);
+  try { if (sessionStorage.getItem('embrace-updated') === VERSION) { sessionStorage.removeItem('embrace-updated'); setTimeout(function () { toast('Embrace updated to ' + VERSION); }, 1500); } } catch (e) { /* ignore */ }
+
   /* ---------------- boot ---------------- */
   var subscribed = false;
   store.init(function (st) {
@@ -1959,6 +2037,7 @@
         applyPendingPhones();
         applyPendingPerson();
         applyPendingTalks();
+        finishPastPlans();
         if (S.sheet && (S.sheet.type === 'visit' || S.sheet.type === 'status' || S.sheet.type === 'group' || S.sheet.type === 'plan' || S.sheet.type === 't-week' || S.sheet.type === 't-settings')) renderSheet();
       });
     }
