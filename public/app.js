@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '5.3';
+  var VERSION = '5.4';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -514,10 +514,21 @@
       h += '<button class="cta" data-action="t-week" data-date="' + soon[0] + '">' + I.plus + 'Fill ' + esc(longDate(soon[0])) + '</button>' +
         '<p class="foot" style="margin-top:-8px">' + soon.length + (soon.length === 1 ? ' weekend' : ' weekends') + ' in the next 3 months still need a speaker.</p>';
     }
-    for (var m = 0; m < 12; m++) {
+    var month = function (m) {
       var days = wk.filter(function (d) { return +d.slice(5, 7) === m + 1; });
-      if (days.length) h += '<h2 class="label" id="tm-' + m + '">' + MON[m] + '</h2><div class="glass list">' + days.map(function (d) { return tWeekRow(d, byW[d]); }).join('') + '</div>';
+      return days.length ? '<h2 class="label" id="tm-' + m + '">' + MON[m] + '</h2><div class="glass list">' + days.map(function (d) { return tWeekRow(d, byW[d]); }).join('') + '</div>' : '';
+    };
+    // This year: the months already gone by fold up under "Past months".
+    var first = y === new Date().getFullYear() ? new Date().getMonth() : 0;
+    if (first > 0) {
+      var pastDays = wk.filter(function (d) { return +d.slice(5, 7) <= first; }), pastHad = pastDays.filter(function (d) { return tFilled(tIn(d)); }).length;
+      var open = !!S.tPastOpen;
+      h += '<div class="glass list fold' + (open ? ' open' : '') + '" style="margin-top:14px"><button class="cell fold-head" data-action="t-past" aria-expanded="' + open + '">' +
+        '<span class="txt"><b>Past months</b><small>' + esc(MON[0].slice(0, 3) + (first > 1 ? ' – ' + MON[first - 1].slice(0, 3) : '')) + ' · ' + pastHad + ' of ' + pastDays.length + ' weekends had a talk</small></span>' +
+        '<svg class="fold-chev" width="14" height="9" viewBox="0 0 14 9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 1.5l6 6 6-6"/></svg></button></div>';
+      if (open) for (var pm = 0; pm < first; pm++) h += month(pm);
     }
+    for (var m = first; m < 12; m++) h += month(m);
     return h + '<button class="quiet glass" data-action="t-copy">Copy the ' + y + ' schedule</button>';
   }
   function tInView() {
@@ -1191,7 +1202,7 @@
       $main.innerHTML = p ? viewPerson(p) : S.tab === 'home' ? viewHome() : S.tab === 'flock' ? viewFlock() : S.tab === 'upcoming' ? viewUpcoming() : S.tab === 'talks' ? viewTalks() : viewSettings();
       $tabs.innerHTML = tabs();
       S.hop = null;
-      if (!p && S.tab === 'talks' && (S.tPart || 'year') === 'year' && !S.tScrolled && S.tYear === new Date().getFullYear()) {
+      if (false && !p && S.tab === 'talks' && (S.tPart || 'year') === 'year' && !S.tScrolled && S.tYear === new Date().getFullYear()) {
         S.tScrolled = true;
         var tm = document.getElementById('tm-' + new Date().getMonth());
         if (tm && new Date().getMonth() > 0 && tm.scrollIntoView) setTimeout(function () { tm.scrollIntoView({ block: 'start' }); window.scrollBy(0, -12); }, 60);
@@ -1704,6 +1715,7 @@
       '<div id="t-imp-preview"></div><button class="cta" id="t-imp-go" data-action="t-imp-go" disabled>Add talks</button>';
   }
   var TA_IMPORT = {
+    't-past': function () { S.tPastOpen = !S.tPastOpen; var sy = window.scrollY; render(); window.scrollTo(0, sy); },
     't-import': function (el) { var sh = { type: 't-import', dir: el.dataset.dir || (S.tPart === 'out' ? 'out' : 'in'), text: '', replace: false }; if (S.sheet) swapSheet(sh); else openSheet(sh); setTimeout(tImpRefresh, 0); },
     't-imp-dir': function (el) { tImpRefresh(); S.sheet.dir = el.dataset.dir; renderSheet(); tImpRefresh(); },
     't-imp-go': function () {
