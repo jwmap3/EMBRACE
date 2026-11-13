@@ -394,3 +394,7 @@ textarea { display: block; width: 100%; min-height: 140px; border: none; resize:
 .datechip.past { background: var(--fill); color: var(--fg2); }
 .dot.pend { background: var(--st-soon); width: 10px; height: 10px; }
 .tabs button { font-size: 11.5px; }
+
+/* past days with a recorded visit */
+.cal-grid button.had { position: relative; color: var(--fg); }
+.cal-grid button.had::after { content: ""; position: absolute; left: 50%; bottom: 5px; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; background: var(--fg2); opacity: .7; }

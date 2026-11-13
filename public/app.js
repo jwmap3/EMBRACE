@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '5.4';
+  var VERSION = '5.5';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -306,8 +306,9 @@
   /* The shared calendar at the bottom of Home. */
   function homeCalendar() {
     var c = S.homeCal, y = c.y, m = c.m, today = todayStr(), up = plans();
-    var days = {};
+    var days = {}, had = {};
     (S.data.plans || []).forEach(function (x) { days[x.date] = (days[x.date] || 0) + 1; });
+    S.data.visits.forEach(function (v) { if (v.date < today && (v.elders || []).length) had[v.date] = (had[v.date] || 0) + 1; });
     var startDow = new Date(y, m, 1).getDay(), n = new Date(y, m + 1, 0).getDate();
     var h = '<div class="cal" style="padding-top:4px"><div class="cal-head"><button class="link" data-action="hcal" data-step="-1" aria-label="Previous month">' + I.left + '</button>' +
       '<b>' + MON[m] + ' ' + y + '</b><button class="link" data-action="hcal" data-step="1" aria-label="Next month">' + I.right + '</button></div>' +
@@ -315,12 +316,36 @@
     for (var i = 0; i < startDow; i++) h += '<span></span>';
     for (var d = 1; d <= n; d++) {
       var s = y + '-' + pad(m + 1) + '-' + pad(d);
-      h += '<button data-action="plan-day" data-date="' + s + '" class="' + (s === today ? 'today ' : '') + (days[s] ? 'has' : '') + '" aria-label="' + MON[m] + ' ' + d + (days[s] ? ', ' + days[s] + ' planned' : '') + '"' +
-        (s < today ? ' disabled' : '') + '>' + d + '</button>';
+      if (s < today) {
+        // past days: the ones with a recorded visit can be opened to see who was visited
+        h += '<button data-action="past-day" data-date="' + s + '" class="' + (had[s] ? 'had' : '') + '" aria-label="' + MON[m] + ' ' + d + (had[s] ? ', ' + had[s] + (had[s] === 1 ? ' visit' : ' visits') : '') + '"' + (had[s] ? '' : ' disabled') + '>' + d + '</button>';
+        continue;
+      }
+      h += '<button data-action="plan-day" data-date="' + s + '" class="' + (s === today ? 'today ' : '') + (days[s] ? 'has' : '') + '" aria-label="' + MON[m] + ' ' + d + (days[s] ? ', ' + days[s] + ' planned' : '') + '">' + d + '</button>';
     }
     h += '</div></div>';
     return '<div class="glass list" id="home-cal"><div class="card-head"><h2>Upcoming visits</h2><button data-action="plan-new">Add</button></div>' + h +
-      (up.length ? up.slice(0, 8).map(planCell).join('') : '<div class="empty" style="padding:6px 18px 20px"><span>No visits planned yet. Tap a day or Add to put one on the calendar for all the brothers.</span></div>') + '</div>';
+      (up.length ? up.slice(0, 8).map(planCell).join('') : '<div class="empty" style="padding:6px 18px 20px"><span>No visits planned yet. Tap a day or Add to put one on the calendar for all the brothers.</span></div>') + pastVisits() + '</div>';
+  }
+  /* Under the calendar: the visits already made, newest first, folded until tapped. */
+  function pastVisits() {
+    var today = todayStr(), past = S.data.visits.filter(function (v) { return v.date <= today && (v.elders || []).length; })
+      .sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : (b.createdAt || 0) > (a.createdAt || 0) ? 1 : -1; });
+    if (!past.length) return '';
+    var open = !!S.pastOpen, shown = past.slice(0, S.pastMore ? 60 : 15);
+    var h = '<button class="cell fold-head" data-action="past-toggle" aria-expanded="' + open + '" style="border-top:1px solid var(--line)">' +
+      '<span class="txt"><b>Past visits</b><small>' + past.length + (past.length === 1 ? ' visit' : ' visits') + ' recorded · last on ' + esc(fmtDate(past[0].date, true)) + '</small></span>' +
+      '<svg class="fold-chev" width="14" height="9" viewBox="0 0 14 9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="transform:rotate(' + (open ? 180 : 0) + 'deg)"><path d="M1 1.5l6 6 6-6"/></svg></button>';
+    if (!open) return h;
+    h += shown.map(function (v) { return noteRow(v, true); }).join('');
+    if (past.length > shown.length) h += '<button class="action" data-action="past-more">Show more</button>';
+    return h;
+  }
+  function sheetDay(date) {
+    var vs = S.data.visits.filter(function (v) { return v.date === date; }).sort(function (a, b) { return String(a.publisherName).localeCompare(String(b.publisherName)); });
+    return head(longDate(date), null, 'Close') +
+      (vs.length ? '<div class="glass list">' + vs.map(function (v) { return noteRow(v, true); }).join('') + '</div><p class="foot">Tap a visit to see its notes.</p>'
+        : '<div class="glass empty"><span>No visits recorded that day.</span></div>');
   }
   function askSheet(opts) {
     var now = new Date(), d = opts && opts.date ? parseDay(opts.date) : now;
@@ -1217,6 +1242,7 @@
     if (sh.type === 'pick') body = sheetPick(true);
     else if (sh.type === 'find' || sh.type === 'assign') body = sheetPick(false);
     else if (sh.type === 'log') { if (!sh.ids.map(pub).filter(Boolean).length) return closeSheet(); body = sheetLog(); }
+    else if (sh.type === 'day') body = sheetDay(sh.date);
     else if (sh.type === 'visit') { var v = visit(sh.id); if (!v) return closeSheet(); body = sheetVisit(v); }
     else if (sh.type === 'status') body = sheetStatus(sh.st);
     else if (sh.type === 'group') body = sheetGroup(sh.g);
@@ -1416,7 +1442,10 @@
         trot(people.length === 1 ? firstName(people[0].name) + '’s visit saved' : people.length + ' visits saved');
       }, fail('v-err'));
     },
-    visit: function (el) { openSheet({ type: 'visit', id: el.dataset.id }); },
+    visit: function (el) { openSheet({ type: 'visit', id: el.dataset.id, back: S.sheet && S.sheet.type === 'day' ? S.sheet : null }); },
+    'past-day': function (el) { openSheet({ type: 'day', date: el.dataset.date }); },
+    'past-toggle': function () { S.pastOpen = !S.pastOpen; S.pastMore = false; var box = document.getElementById('home-cal'); if (box) box.outerHTML = homeCalendar(); },
+    'past-more': function () { S.pastMore = true; var box = document.getElementById('home-cal'); if (box) box.outerHTML = homeCalendar(); },
     'edit-visit': function (el) {
       var v = visit(el.dataset.id); if (!v || !canChange(v)) return;
       var ls = logSheet([v.publisherId]), d = parseDay(v.date);
@@ -1434,7 +1463,7 @@
     },
     confirm: function () { S.sheet.confirm = true; renderSheet(); },
     unconfirm: function () { S.sheet.confirm = false; renderSheet(); },
-    close: function () { closeSheet(); },
+    close: function () { if (S.sheet && S.sheet.type === 'visit' && S.sheet.back) swapSheet(S.sheet.back); else closeSheet(); },
     'save-person': function () {
       var name = document.getElementById('p-name').value.trim().replace(/\s+/g, ' ');
       if (!name) return showErr('p-err', 'Type the person\'s name.');
