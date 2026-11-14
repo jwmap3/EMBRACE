@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '5.7';
+  var VERSION = '5.8';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -675,8 +675,10 @@
       '<div class="glass list"><div style="padding:12px 18px;display:flex;flex-direction:column;gap:8px"><span>Public meeting day</span><div class="seg" role="group" aria-label="Meeting day">' +
       [[6, 'Saturday'], [0, 'Sunday']].map(function (o) { return '<button data-action="t-day" data-day="' + o[0] + '" aria-pressed="' + (c.day === o[0]) + '">' + o[1] + '</button>'; }).join('') + '</div></div>' +
       '<div class="field"><label for="t-time">Meeting time</label><input id="t-time" type="time" value="' + esc(c.time) + '" style="height:42px;border:none;background:transparent;font-size:17px;color:var(--fg)"></div></div>' +
-      '<h2 class="label">Hospitality</h2><div class="glass list"><label class="field" for="t-remind"><span>Remind me to text the hospitality group</span><input class="switch" id="t-remind" type="checkbox"' + (c.remindId && c.remindId === S.meId ? ' checked' : '') + '></label></div>' +
-      '<p class="foot" style="text-align:left;margin-top:-8px">' + (c.remindId && c.remindId !== S.meId && pub(c.remindId) ? 'Reminders go to ' + esc(pub(c.remindId).name) + ' now. Turning this on moves them to you.' : 'In the week before each weekend, Home shows a reminder with a ready-made text to that group’s overseer. Only you see it.') + '</p>' +
+      '<h2 class="label">Hospitality</h2><div class="glass list"><label class="field" for="t-auto"><span>Rotate groups automatically</span><input class="switch" id="t-auto" type="checkbox"' + (c.autoHosp !== false ? ' checked' : '') + '></label>' +
+      (c.autoHosp !== false && tNextHospGroup() ? '<div class="row-plain"><span>Next up</span><span>' + esc(tGroupLabel(tNextHospGroup())) + '</span></div>' : '') +
+      '<label class="field" for="t-remind"><span>Remind me to text the hospitality group</span><input class="switch" id="t-remind" type="checkbox"' + (c.remindId && c.remindId === S.meId ? ' checked' : '') + '></label></div>' +
+      '<p class="foot" style="text-align:left;margin-top:-8px">' + (c.autoHosp !== false ? 'Each new upcoming speaker gets the group whose turn was longest ago. ' : '') + (c.remindId && c.remindId !== S.meId && pub(c.remindId) ? 'Reminders go to ' + esc(pub(c.remindId).name) + ' now. Turning this on moves them to you.' : 'In the week before each weekend, Home shows a reminder with a ready-made text to that group’s overseer. Only you see it.') + '</p>' +
       '<h2 class="label">Talk titles · ' + n + ' saved</h2><div class="glass"><textarea id="t-titles" style="min-height:200px" placeholder="One talk per line, number first:&#10;1 First title&#10;2 Second title"></textarea></div>' +
       '<p class="foot" style="text-align:left;margin-top:-8px">Paste your list of talk outlines here. After that, typing a talk number fills in its title.</p>' +
       '<p class="err" id="ts-err" role="alert" hidden></p><button class="cta" data-action="t-titles-save">Save titles</button>';
@@ -753,8 +755,10 @@
         }
         body.number = tVal('ti-num').replace(/\D/g, ''); body.title = tVal('ti-title'); body.notes = tVal('ti-notes');
       }
+      var hg = '';
       store.putTalk('talk_in_' + sh.date, body).then(function () { return tSaveTitle(body.number, body.title); })
-        .then(function () { tBack(); toast('Saved'); }, function (e) { showErr('ti-err', window.EmbraceStore.friendly(e)); });
+        .then(function () { return tAutoHosp(sh.date, body).then(function (g) { hg = g; }); })
+        .then(function () { tBack(); toast(hg ? 'Saved · ' + tGroupLabel(hg) + ' has hospitality' : 'Saved'); }, function (e) { showErr('ti-err', window.EmbraceStore.friendly(e)); });
     },
     't-in-delete': function () { store.removeTalk('talk_in_' + S.sheet.date).then(function () { tBack(); toast('Weekend cleared'); }); },
     't-in-text': function (el) {
@@ -1792,7 +1796,7 @@
       tSavePlan(plan).then(function (n) {
         if (!n) return;
         closeSheet(); S.tPart = plan.ins.length || plan.hosp.length ? 'year' : 'out'; if (plan.first) S.tYear = +plan.first.slice(0, 4); S.tScrolled = false; render();
-        toast(n + (plan.hosp.length ? (n === 1 ? ' item' : ' items') : (n === 1 ? ' talk' : ' talks')) + ' added to Talks');
+        toast(n + (plan.hosp.length ? (n === 1 ? ' item' : ' items') : (n === 1 ? ' talk' : ' talks')) + ' added to Talks' + (plan.autoHosp ? ' · hospitality set for ' + plan.autoHosp : ''));
       }, function (e) { toast(window.EmbraceStore.friendly(e)); });
     }
   };
@@ -1805,6 +1809,17 @@
     plan.ins.forEach(function (x) { jobs.push(store.putTalk('talk_in_' + x.body.date, x.body)); title(x.body.number, x.body.title); });
     plan.outs.forEach(function (o, i) { jobs.push(store.putTalk('talk_out_' + Date.now().toString(36) + i + Math.random().toString(36).slice(2, 6), o)); title(o.number, o.title); });
     (plan.hosp || []).forEach(function (x) { jobs.push(store.putTalk('talk_hosp_' + x.date, { date: x.date, group: x.group })); });
+    if (tHospAuto()) {
+      var given = (plan.hosp || []).map(function (x) { return { date: x.date, group: x.group }; }), today = todayStr();
+      plan.ins.map(function (x) { return x.body; }).filter(function (b) {
+        return b.type !== 'none' && b.speaker && b.date >= today && !tHosp(b.date) && !given.some(function (g) { return g.date === b.date; });
+      }).sort(function (a, b) { return a.date < b.date ? -1 : 1; }).forEach(function (b) {
+        var g = tNextHospGroup(given); if (!g) return;
+        given.push({ date: b.date, group: g });
+        plan.autoHosp = (plan.autoHosp || 0) + 1;
+        jobs.push(store.putTalk('talk_hosp_' + b.date, { date: b.date, group: g, auto: true }));
+      });
+    }
     if (nt) jobs.push(store.putTalk('talktitles', { map: titles }));
     plan.first = plan.ins.map(function (x) { return x.body.date; }).concat(plan.outs.map(function (o) { return o.date; }), (plan.hosp || []).map(function (x) { return x.date; })).sort()[0];
     return Promise.all(jobs).then(function () { return n; });
@@ -1838,6 +1853,23 @@
     var loose = gs.filter(function (g) { var gw = tNormName(g).split(' '); return gw[gw.length - 1] === w[w.length - 1] && gw[0].charAt(0) === w[0].charAt(0); });
     return loose.length === 1 ? loose[0] : '';
   }
+  /* Fair rotation: the group whose last hospitality is longest ago goes next
+     (a group that has never had it goes first; ties go to the group that has had it fewer times). */
+  function tHospAuto() { return tCfg().autoHosp !== false; }
+  function tNextHospGroup(extra) {
+    var gs = tGroups(); if (!gs.length) return '';
+    var last = {}, count = {};
+    gs.forEach(function (g) { last[g] = ''; count[g] = 0; });
+    var all = Object.keys(tDocs()).filter(function (k) { return k.indexOf('talk_hosp_') === 0; }).map(function (k) { return tDocs()[k]; }).concat(extra || []);
+    all.forEach(function (h) { if (!h || !(h.group in last)) return; count[h.group]++; if (h.date > last[h.group]) last[h.group] = h.date; });
+    return gs.slice().sort(function (a, b) { return last[a] !== last[b] ? (last[a] < last[b] ? -1 : 1) : count[a] - count[b] || gs.indexOf(a) - gs.indexOf(b); })[0];
+  }
+  // For a weekend that just got a speaker: give it the next group, if it's coming up and has none yet.
+  function tAutoHosp(date, talk) {
+    if (!tHospAuto() || !talk || talk.type === 'none' || !talk.speaker || date < todayStr() || tHosp(date)) return Promise.resolve('');
+    var g = tNextHospGroup(); if (!g) return Promise.resolve('');
+    return store.putTalk('talk_hosp_' + date, { date: date, group: g, auto: true }).then(function () { return g; });
+  }
   function tGroupLabel(group) { var o = tOverseer(group); return (o ? o.name : group) + '’s group'; }
   function tHospText(date) {
     var hs = tHosp(date); if (!hs) return '';
@@ -1869,7 +1901,7 @@
     var hs = tHosp(date), o = hs ? tOverseer(hs.group) : null, ph = o ? digits(o.phone) : '';
     return '<h2 class="label">Hospitality</h2><div class="glass list">' +
       '<button class="cell" data-action="t-hosp-pick" data-date="' + date + '"><span class="txt"><b>' + (hs ? esc(tGroupLabel(hs.group)) : 'No group chosen') + '</b>' +
-      (hs && hs.texted ? '<small>Reminder sent ' + esc(fmtDate(hs.texted, true)) + '</small>' : '<small>Tap to ' + (hs ? 'change' : 'choose') + ' the group</small>') + '</span>' + I.chev + '</button>' +
+      (hs && hs.texted ? '<small>Reminder sent ' + esc(fmtDate(hs.texted, true)) + '</small>' : '<small>' + (hs && hs.auto ? 'Next in the rotation · tap to change' : 'Tap to ' + (hs ? 'change' : 'choose') + ' the group') + '</small>') + '</span>' + I.chev + '</button>' +
       (hs && ph.length >= 10 ? '<button class="action" data-action="t-hosp-text" data-date="' + date + '">Text ' + esc(firstName(o.name)) + ' a hospitality reminder</button>' : '') + '</div>';
   }
   function sheetTHosp(date) {
@@ -2060,6 +2092,7 @@
     if (t.id === 's-od') store.saveSettings({ overdueDays: +t.value });
     if (t.id === 't-time') { store.putTalk('talkcfg', Object.assign({}, tCfg(), { time: t.value || '10:00' })).then(function () { toast('Saved'); }); }
     if (t.id === 't-remind') A['t-remind']();
+    if (t.id === 't-auto') store.putTalk('talkcfg', Object.assign({}, tCfg(), { autoHosp: !!t.checked })).then(function () { toast(t.checked ? 'Hospitality rotates automatically' : 'Rotation off'); renderSheet(); });
     if (t.id === 's-phone' && me()) store.savePublisher({ id: S.meId, phone: digits(t.value) }).then(function () { toast('Saved'); });
     if (t.classList && t.classList.contains('ask-phone')) {
       var num = digits(t.value), pid = t.dataset.pid;
