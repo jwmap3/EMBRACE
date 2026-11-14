@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '5.6';
+  var VERSION = '5.7';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -516,11 +516,12 @@
   function viewTalks() {
     var part = S.tPart || 'year';
     var h = '<div class="screen"><div class="top"><h1 class="title">Talks</h1><span class="sub">Public talk schedule</span></div>' +
-      '<div class="seg glass" role="group" aria-label="Show">' + [['year', 'Year'], ['in', 'Incoming'], ['out', 'Outgoing']].map(function (o) {
+      '<div class="seg glass" role="group" aria-label="Show">' + [['year', 'Year'], ['in', 'Incoming'], ['out', 'Outgoing'], ['outlines', 'Outlines']].map(function (o) {
         return '<button data-action="t-part" data-part="' + o[0] + '" aria-pressed="' + (part === o[0]) + '">' + o[1] + '</button>';
       }).join('') + '</div>';
     if (part === 'year') h += tYearView();
     else if (part === 'in') h += tInView();
+    else if (part === 'outlines') h += tOutlinesView();
     else h += tOutView();
     h += '<button class="quiet glass" data-action="t-import">' + I.plus + ' Import talks</button><button class="quiet glass" data-action="t-settings">Talk settings</button>';
     return h + '</div>';
@@ -626,6 +627,7 @@
         (vis ? '<div class="field"><label for="ti-speaker">Speaker</label><input id="ti-speaker" type="text" value="' + esc(t.type === 'visitor' ? t.speaker || '' : '') + '" placeholder="Full name" autocomplete="off"></div>' +
           '<div class="field"><label for="ti-cong">From</label><input id="ti-cong" type="text" list="t-congs" value="' + esc(t.fromCong || '') + '" placeholder="Congregation"></div>' : '') +
         '<div class="field"><label for="ti-num">Talk number</label><input id="ti-num" type="text" inputmode="numeric" value="' + esc(t.number || '') + '" placeholder="#" style="max-width:120px"></div>' +
+        '<p id="ti-last" class="foot" style="text-align:left;margin:0;padding:0 18px 10px" aria-live="polite">' + esc(tHintText(t.number, sh.date)) + '</p>' +
         '<div class="field"><label for="ti-title">Title</label><input id="ti-title" type="text" value="' + esc(t.title || '') + '" placeholder="Talk title"></div>' +
         (vis ? '<div class="field"><label for="ti-phone">Phone</label><input id="ti-phone" type="text" inputmode="tel" value="' + esc(fmtPhone(t.phone || '')) + '" placeholder="(419) 555-1234"></div>' +
           '<label class="field" for="ti-ok"><span>Confirmed</span><input class="switch" id="ti-ok" type="checkbox"' + (t.confirmed ? ' checked' : '') + '></label>' : '') + '</div>' +
@@ -797,7 +799,7 @@
       var map = Object.assign({}, tTitles()), n = 0;
       tVal('t-titles').split(/\r?\n/).forEach(function (line) {
         var mm = /^\s*#?(\d{1,3})[\s.:)\-–]+(.+?)\s*$/.exec(line);
-        if (mm) { map[String(+mm[1])] = mm[2].replace(/^["“]|["”]$/g, ''); n++; }
+        if (mm) { map[String(+mm[1])] = /^["“][^"“”]*["”]$/.test(mm[2]) ? mm[2].slice(1, -1) : mm[2]; n++; }
       });
       if (!n) return showErr('ts-err', 'Put the talk number first on each line, then the title.');
       store.putTalk('talktitles', { map: map }).then(function () { renderSheet(); toast(n + (n === 1 ? ' title saved' : ' titles saved')); });
@@ -1259,6 +1261,7 @@
     else if (sh.type === 't-copy') body = sheetTCopy(sh.year);
     else if (sh.type === 't-import') body = sheetTImport(sh);
     else if (sh.type === 't-hosp') body = sheetTHosp(sh.date);
+    else if (sh.type === 't-outline') body = sheetTOutline(sh.n);
     else if (sh.type === 'plan') { var pl = planById(sh.id); if (!pl) return closeSheet(); body = sheetPlan(pl); }
     else if (sh.type === 'visits') body = sheetAllVisits();
     else if (sh.type === 'edit') body = sheetEdit(sh.id ? pub(sh.id) : null);
@@ -1899,6 +1902,115 @@
   };
   Object.keys(TA_HOSP).forEach(function (k) { TA[k] = TA_HOSP[k]; });
 
+  /* ---------------- Talks: outlines ----------------
+     Every outline in the title list, with when it was last given here and what's scheduled.
+     History comes from the weekends in Embrace (incoming talks, ours included); talks our brothers
+     give elsewhere are listed separately. */
+  function tAgo(date) {
+    var days = Math.round((parseDay(todayStr()) - parseDay(date)) / 864e5);
+    if (days < 0) { var f = -days; return f < 14 ? 'in ' + f + (f === 1 ? ' day' : ' days') : f < 60 ? 'in ' + Math.round(f / 7) + ' weeks' : 'in ' + Math.round(f / 30.4) + ' months'; }
+    if (days === 0) return 'today';
+    if (days < 14) return days + (days === 1 ? ' day ago' : ' days ago');
+    if (days < 60) return Math.round(days / 7) + ' weeks ago';
+    var mo = Math.round(days / 30.4);
+    if (mo < 12) return mo + ' months ago';
+    var y = Math.floor(mo / 12), r = mo % 12;
+    return y + (y === 1 ? ' year' : ' years') + (r ? ' ' + r + (r === 1 ? ' month' : ' months') : '') + ' ago';
+  }
+  // number → { here: [{date, speaker, cong, local}], away: [{date, speaker, cong}] }, each oldest first
+  function tOutlineHistory() {
+    var h = {}, docs = tDocs(), add = function (n) { return h[n] = h[n] || { here: [], away: [] }; };
+    Object.keys(docs).forEach(function (k) {
+      var t = docs[k]; if (!t || !t.number) return;
+      if (k.indexOf('talk_in_') === 0 && t.speaker) add(t.number).here.push({ date: t.date, speaker: t.speaker, cong: t.type === 'local' ? tShortCong() : t.fromCong || '', title: t.title || '' });
+      if (k.indexOf('talk_out_') === 0) add(t.number).away.push({ date: t.date, speaker: (pub(t.brotherId) || {}).name || t.brotherName || '', cong: t.toCong || '', title: t.title || '' });
+    });
+    Object.keys(h).forEach(function (n) { h[n].here.sort(function (a, b) { return a.date < b.date ? -1 : 1; }); h[n].away.sort(function (a, b) { return a.date < b.date ? -1 : 1; }); });
+    return h;
+  }
+  function tOutlineFacts(hist) {
+    var today = todayStr(), here = hist ? hist.here : [];
+    var past = here.filter(function (x) { return x.date <= today; }), next = here.filter(function (x) { return x.date > today; })[0];
+    return { last: past[past.length - 1] || null, next: next || null, count: past.length };
+  }
+  function tOutlineRetired(title) { return /do not use|not in use|discontinued|no longer|retired/i.test(title || ''); }
+  function tOutlinesView() {
+    var titles = tTitles(), hist = tOutlineHistory(), q = String(S.tq || '').trim().toLowerCase(), sort = S.tSort || 'num';
+    var nums = Object.keys(titles).concat(Object.keys(hist)).filter(function (n, i, l) { return n && l.indexOf(n) === i; });
+    var h = '<label class="search glass">' + I.search + '<span class="sr">Find an outline</span><input id="t-oq" type="search" autocomplete="off" placeholder="Number or words in the title" value="' + esc(S.tq || '') + '"></label>' +
+      '<div class="seg glass" role="group" aria-label="Sort" style="margin-top:10px">' + [['num', 'By number'], ['old', 'Longest ago'], ['recent', 'Most recent']].map(function (o) {
+        return '<button data-action="t-osort" data-sort="' + o[0] + '" aria-pressed="' + (sort === o[0]) + '">' + o[1] + '</button>';
+      }).join('') + '</div>';
+    if (!nums.length) return h + '<div class="glass empty"><b>No outlines yet</b><span>Paste the outline list in Talk settings, and each one shows when it was last given here.</span></div>';
+    return h + '<div id="t-olist">' + tOutlineList(nums, titles, hist, q, sort) + '</div>';
+  }
+  function tOutlineList(nums, titles, hist, q, sort) {
+    var rows = nums.map(function (n) {
+      var title = titles[n] || ((hist[n] && (hist[n].here[0] || hist[n].away[0]) || {}).title) || '';
+      return { n: n, title: title, f: tOutlineFacts(hist[n]), away: hist[n] ? hist[n].away : [] };
+    }).filter(function (r) {
+      if (!q) return true;
+      if (/^#?\d+$/.test(q)) return r.n === q.replace('#', '') || r.n.indexOf(q.replace('#', '')) === 0;
+      return q.split(/\s+/).every(function (w) { return r.title.toLowerCase().indexOf(w) >= 0; });
+    });
+    var never = '0000-00-00';
+    rows.sort(function (a, b) {
+      if (sort === 'num') return +a.n - +b.n;
+      var la = a.f.last ? a.f.last.date : never, lb = b.f.last ? b.f.last.date : never;
+      if (sort === 'old') return la !== lb ? (la < lb ? -1 : 1) : +a.n - +b.n;
+      return la !== lb ? (la < lb ? 1 : -1) : +a.n - +b.n;
+    });
+    if (!rows.length) return '<div class="glass empty"><span>No outline matches “' + esc(q) + '”.</span></div>';
+    var shown = rows.slice(0, S.tOMore ? 400 : 60);
+    return '<p class="foot" style="margin:6px 0 8px">' + rows.length + (rows.length === 1 ? ' outline' : ' outlines') + '</p><div class="glass list">' + shown.map(function (r) {
+      var f = r.f, retired = tOutlineRetired(r.title);
+      var line = f.last ? 'Last given ' + fmtDate(f.last.date, true) + ' · ' + tAgo(f.last.date) : 'Not given here in Embrace yet';
+      return '<button class="cell" data-action="t-outline" data-n="' + esc(r.n) + '"' + (retired ? ' style="opacity:.55"' : '') + '>' +
+        '<span class="datechip" aria-hidden="true"><small>No.</small><b>' + esc(r.n) + '</b></span>' +
+        '<span class="txt"><b>' + esc(r.title || 'Outline ' + r.n) + '</b><small>' + esc(line) + '</small>' +
+        (f.next ? '<small class="out-line">Scheduled ' + esc(fmtDate(f.next.date, true)) + ' · ' + esc(f.next.speaker) + '</small>' : '') + '</span>' + I.chev + '</button>';
+    }).join('') + '</div>' + (rows.length > shown.length ? '<button class="quiet glass" data-action="t-omore">Show all ' + rows.length + '</button>' : '');
+  }
+  function tOutlineRefresh() {
+    var el = document.getElementById('t-olist'); if (!el) return;
+    var titles = tTitles(), hist = tOutlineHistory();
+    var nums = Object.keys(titles).concat(Object.keys(hist)).filter(function (n, i, l) { return n && l.indexOf(n) === i; });
+    el.innerHTML = tOutlineList(nums, titles, hist, String(S.tq || '').trim().toLowerCase(), S.tSort || 'num');
+  }
+  function sheetTOutline(n) {
+    var hist = tOutlineHistory()[n] || { here: [], away: [] }, title = tTitles()[n] || ((hist.here[0] || hist.away[0] || {}).title) || 'Outline ' + n;
+    var f = tOutlineFacts(hist), today = todayStr();
+    var row = function (x, away) {
+      return '<div class="row-plain"><span style="white-space:nowrap">' + esc(fmtDate(x.date, true)) + (x.date > today ? ' <span class="flag">Scheduled</span>' : '') + '</span><span>' + esc(x.speaker + (x.cong ? ' · ' + (away ? 'at ' : '') + x.cong : '')) + '</span></div>';
+    };
+    return tHead('Outline ' + n) + '<h2 style="font-family:var(--display);font-size:24px;line-height:1.25;margin:0 4px 6px;text-align:center">' + esc(title) + '</h2>' +
+      '<p class="sub" style="text-align:center;margin:0 0 14px">' + esc(f.last ? 'Last given here ' + tAgo(f.last.date) + ' (' + fmtDate(f.last.date, true) + ')' : 'Not given here in Embrace yet') + '</p>' +
+      '<h2 class="label">Given here · ' + hist.here.length + '</h2>' + (hist.here.length ? '<div class="glass list">' + hist.here.slice().reverse().map(function (x) { return row(x, false); }).join('') + '</div>' : '<div class="glass empty"><span>No weekends with this outline yet.</span></div>') +
+      (hist.away.length ? '<h2 class="label">Given by our brothers elsewhere · ' + hist.away.length + '</h2><div class="glass list">' + hist.away.slice().reverse().map(function (x) { return row(x, true); }).join('') + '</div>' : '') +
+      '<p class="foot">History counts the weekends entered in Embrace.</p>';
+  }
+  // A short line under the talk number while assigning a talk.
+  function tOutlineHint(numId, hintId, date) {
+    var el = document.getElementById(hintId); if (!el) return;
+    el.textContent = tHintText(tVal(numId), date);
+  }
+  function tHintText(num, date) {
+    var n = String(num || '').replace(/\D/g, ''); if (!n) return '';
+    if (tOutlineRetired(tTitles()[n])) return 'Outline ' + n + ' is marked “Do not use.”';
+    var here = (tOutlineHistory()[n] || { here: [] }).here.filter(function (x) { return x.date !== date; });
+    var past = here.filter(function (x) { return x.date <= todayStr(); }), next = here.filter(function (x) { return x.date > todayStr(); })[0];
+    var bits = [];
+    bits.push(past.length ? 'Last given here ' + tAgo(past[past.length - 1].date) + ' (' + fmtDate(past[past.length - 1].date, true) + ', ' + past[past.length - 1].speaker + ')' : 'Not given here in Embrace yet');
+    if (next) bits.push('Also scheduled ' + fmtDate(next.date, true));
+    return bits.join(' · ');
+  }
+  var TA_OUT = {
+    't-outline': function (el) { openSheet({ type: 't-outline', n: el.dataset.n }); },
+    't-osort': function (el) { S.tSort = el.dataset.sort; render(); },
+    't-omore': function () { S.tOMore = true; tOutlineRefresh(); }
+  };
+  Object.keys(TA_OUT).forEach(function (k) { TA[k] = TA_OUT[k]; });
+
   Object.keys(TA).forEach(function (k) { A[k] = TA[k]; });
   function gateCode(c) {
     if (S.busy) return;
@@ -1924,7 +2036,8 @@
     if (t.id === 'ask-search') { S.sheet.q = t.value; document.getElementById('ask-results').innerHTML = askResults(); }
     if (t.id === 'ask-msg') { S.sheet.edited = true; S.sheet.msg = t.value; }
     if (t.id === 'ask-time') { S.sheet.time = t.value; refreshMsg(); }
-    if (t.id === 'ti-num') tFillTitle('ti-num', 'ti-title');
+    if (t.id === 'ti-num') { tFillTitle('ti-num', 'ti-title'); tOutlineHint('ti-num', 'ti-last', S.sheet && S.sheet.date); }
+    if (t.id === 't-oq') { S.tq = t.value; S.tOMore = false; tOutlineRefresh(); }
     if (t.id === 'to-num') tFillTitle('to-num', 'to-title');
     if (t.id === 'ti-title' || t.id === 'to-title') t.dataset.typed = t.value ? '1' : '';
     if (t.id === 'to-date' && S.sheet) S.sheet.date = t.value;
@@ -2128,6 +2241,16 @@
   var pendingTalks = null, pendingCfg = null;
   (function () {
     var h = location.hash || '';
+    if (h.indexOf('#talksz=') === 0 && window.DecompressionStream) {
+      // the same, squeezed (deflate + base64url) so long lists fit in a link
+      var b64 = h.slice(8).replace(/-/g, '+').replace(/_/g, '/'), bin = atob(b64 + '==='.slice((b64.length + 3) % 4)), bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* ignore */ }
+      new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text().then(function (s) {
+        pendingTalks = JSON.parse(s); lsSet('embrace-talks', s); applyPendingTalks();
+      }, function () { /* bad link */ });
+      return;
+    }
     if (h.indexOf('#talks=') !== 0) return;
     try { pendingTalks = JSON.parse(decodeURIComponent(h.slice(7))); lsSet('embrace-talks', JSON.stringify(pendingTalks)); } catch (e) { /* bad link */ }
     try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* ignore */ }
@@ -2139,6 +2262,14 @@
     if (p.remind) {
       var rb = tFindBro(p.remind);
       if (rb) pendingCfg = Object.assign({}, pendingCfg || {}, { remindId: rb.id });
+    }
+    if (p.titles && typeof p.titles === 'object') {
+      var tm = p.titlesReplace ? {} : Object.assign({}, tTitles()), tn = 0;
+      Object.keys(p.titles).forEach(function (k) { if (/^\d{1,3}$/.test(k) && p.titles[k]) { tm[String(+k)] = String(p.titles[k]); tn++; } });
+      if (tn) store.putTalk('talktitles', { map: tm }).then(function () {
+        if (!p.text) { S.tab = 'talks'; S.tPart = 'outlines'; render(); toast(tn + ' outlines saved'); }
+      });
+      if (!p.text) return;
     }
     if (p.text) {
       var plan = tPlanImport(p.text, 'in', !!p.replace), c0 = tCfg();
