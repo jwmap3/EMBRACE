@@ -1621,7 +1621,7 @@
     var items = [];
     blocks.forEach(function (b) {
       var f = function (k) { return (b.f[k] || [])[0] || ''; };
-      // "David Packard (Maumee, Ohio)" → speaker and congregation
+      // "John Smith (Riverside)" → speaker and congregation
       var sp = f('speaker').match(/^(.*?)\s*\(([^)]*)\)\s*$/);
       if (sp && !/^(confirmed|unconfirmed)$/i.test(sp[2])) { b.f.speaker = [sp[1]]; if (!f('congregation')) b.f.congregation = [sp[2]]; }
       var hg = f('hospitality') ? tGroupOf(f('hospitality').replace(/\s*\((un)?confirmed\)\s*$/i, '')) : '';
