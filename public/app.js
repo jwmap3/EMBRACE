@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '5.5';
+  var VERSION = '5.6';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -501,7 +501,8 @@
     return '<button class="cell week' + (past ? ' past' : '') + '" data-action="t-week" data-date="' + date + '">' + tChip(date, past) +
       '<span class="txt">' + (main ? '<b>' + esc(main) + '</b>' : past ? '<b>Nothing recorded</b>' : '<b class="open">Open · needs a speaker</b>') +
       (sub.filter(Boolean).length ? '<small>' + esc(sub.filter(Boolean).join(' · ')) + '</small>' : '') +
-      (away.length ? '<small class="out-line">Away: ' + esc(away.join(', ')) + '</small>' : '') + '</span>' +
+      (away.length ? '<small class="out-line">Away: ' + esc(away.join(', ')) + '</small>' : '') +
+      (tHosp(date) ? '<small class="hosp-line">Hospitality: ' + esc(tGroupLabel(tHosp(date).group)) + '</small>' : '') + '</span>' +
       (t && t.speaker && !t.confirmed && t.type !== 'local' ? '<i class="dot pend" title="Not confirmed"></i>' : '') + I.chev + '</button>';
   }
   function tOutRow(o) {
@@ -535,6 +536,7 @@
       '<div class="duo"><div class="glass tile" style="cursor:default"><span class="tile-label">Incoming</span><b>' + have + '<small> of ' + wk.length + '</small></b>' +
       '<span class="bar"><i style="width:' + Math.round(have / wk.length * 100) + '%"></i></span><span class="tile-sub">weekends planned</span></div>' +
       '<div class="glass tile" style="cursor:default"><span class="tile-label">Outgoing</span><b>' + outCount + '</b><span class="tile-sub">talks by our brothers</span></div></div>';
+    h += tHospCard();
     if (y === new Date().getFullYear() && soon.length) {
       h += '<button class="cta" data-action="t-week" data-date="' + soon[0] + '">' + I.plus + 'Fill ' + esc(longDate(soon[0])) + '</button>' +
         '<p class="foot" style="margin-top:-8px">' + soon.length + (soon.length === 1 ? ' weekend' : ' weekends') + ' in the next 3 months still need a speaker.</p>';
@@ -600,6 +602,7 @@
     } else {
       h += '<button class="cta" data-action="t-in-edit" data-date="' + date + '">' + I.plus + 'Assign the speaker</button>';
     }
+    h += tHospSection(date);
     return h + '<h2 class="label">Our brothers away</h2>' + (outs.length ? '<div class="glass list">' + outs.map(tOutRow).join('') + '</div>' : '') +
       '<button class="quiet glass" data-action="t-out-new" data-date="' + date + '">' + I.plus + ' Add an outgoing talk</button>';
   }
@@ -670,6 +673,8 @@
       '<div class="glass list"><div style="padding:12px 18px;display:flex;flex-direction:column;gap:8px"><span>Public meeting day</span><div class="seg" role="group" aria-label="Meeting day">' +
       [[6, 'Saturday'], [0, 'Sunday']].map(function (o) { return '<button data-action="t-day" data-day="' + o[0] + '" aria-pressed="' + (c.day === o[0]) + '">' + o[1] + '</button>'; }).join('') + '</div></div>' +
       '<div class="field"><label for="t-time">Meeting time</label><input id="t-time" type="time" value="' + esc(c.time) + '" style="height:42px;border:none;background:transparent;font-size:17px;color:var(--fg)"></div></div>' +
+      '<h2 class="label">Hospitality</h2><div class="glass list"><label class="field" for="t-remind"><span>Remind me to text the hospitality group</span><input class="switch" id="t-remind" type="checkbox"' + (c.remindId && c.remindId === S.meId ? ' checked' : '') + '></label></div>' +
+      '<p class="foot" style="text-align:left;margin-top:-8px">' + (c.remindId && c.remindId !== S.meId && pub(c.remindId) ? 'Reminders go to ' + esc(pub(c.remindId).name) + ' now. Turning this on moves them to you.' : 'In the week before each weekend, Home shows a reminder with a ready-made text to that group’s overseer. Only you see it.') + '</p>' +
       '<h2 class="label">Talk titles · ' + n + ' saved</h2><div class="glass"><textarea id="t-titles" style="min-height:200px" placeholder="One talk per line, number first:&#10;1 First title&#10;2 Second title"></textarea></div>' +
       '<p class="foot" style="text-align:left;margin-top:-8px">Paste your list of talk outlines here. After that, typing a talk number fills in its title.</p>' +
       '<p class="err" id="ts-err" role="alert" hidden></p><button class="cta" data-action="t-titles-save">Save titles</button>';
@@ -786,7 +791,7 @@
     },
     't-day': function (el) {
       var c = tCfg(); c.day = +el.dataset.day;
-      store.putTalk('talkcfg', { day: c.day, time: c.time }).then(function () { renderSheet(); });
+      store.putTalk('talkcfg', Object.assign({}, tCfg(), { day: c.day })).then(function () { renderSheet(); });
     },
     't-titles-save': function () {
       var map = Object.assign({}, tTitles()), n = 0;
@@ -817,7 +822,7 @@
     var recent = S.data.visits.slice().sort(visitOrder).slice(0, 3);
 
     var h = '<div class="screen home">' +
-      '<div class="top rise"><span class="hello">' + greeting() + (m ? ', ' + esc(firstName(m.name)) : '') + '</span><h1 class="brand">Embrace</h1>' + (cong ? '<span class="sub">' + esc(cong) + '</span>' : '') + '</div>';
+      '<div class="top rise"><span class="hello">' + greeting() + (m ? ', ' + esc(firstName(m.name)) : '') + '</span><h1 class="brand">Embrace</h1>' + (cong ? '<span class="sub">' + esc(cong) + '</span>' : '') + '</div>' + tHospCard();
     // Until the congregation's list is in, the first thing on Home is the button to bring it in.
     if (S.data.publishers.length < 10) {
       h += '<div class="glass empty rise">' + sheep(70, 'bob') + '<b>Bring in your publishers</b>' +
@@ -1253,6 +1258,7 @@
     else if (sh.type === 't-settings') body = sheetTSettings();
     else if (sh.type === 't-copy') body = sheetTCopy(sh.year);
     else if (sh.type === 't-import') body = sheetTImport(sh);
+    else if (sh.type === 't-hosp') body = sheetTHosp(sh.date);
     else if (sh.type === 'plan') { var pl = planById(sh.id); if (!pl) return closeSheet(); body = sheetPlan(pl); }
     else if (sh.type === 'visits') body = sheetAllVisits();
     else if (sh.type === 'edit') body = sheetEdit(sh.id ? pub(sh.id) : null);
@@ -1526,7 +1532,7 @@
     var y, m, d, x;
     if ((x = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) { y = +x[1]; m = +x[2]; d = +x[3]; }
     else if ((x = s.match(/^(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](\d{2,4}))?(?:\s+\d{1,2}:\d{2}.*)?$/))) { m = +x[1]; d = +x[2]; y = x[3] ? +x[3] : 0; if (y && y < 100) y += 2000; }
-    else if ((x = s.match(/^([a-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?(?:\s+.*)?$/i)) && T_MON.indexOf(x[1].slice(0, 3).toLowerCase()) >= 0) { m = T_MON.indexOf(x[1].slice(0, 3).toLowerCase()) + 1; d = +x[2]; y = x[3] ? +x[3] : 0; }
+    else if ((x = s.match(/^([a-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*((?:19|20)\d{2})(?!\d))?(?:\s+.*)?$/i)) && T_MON.indexOf(x[1].slice(0, 3).toLowerCase()) >= 0) { m = T_MON.indexOf(x[1].slice(0, 3).toLowerCase()) + 1; d = +x[2]; y = x[3] ? +x[3] : 0; }
     else if ((x = s.match(/^(\d{1,2})\s+([a-z]{3,9})\.?,?\s*(\d{4})?$/i)) && T_MON.indexOf(x[2].slice(0, 3).toLowerCase()) >= 0) { d = +x[1]; m = T_MON.indexOf(x[2].slice(0, 3).toLowerCase()) + 1; y = x[3] ? +x[3] : 0; }
     else if (/^\d{5}$/.test(s) && +s > 40000 && +s < 60000) { var ex = new Date(1899, 11, 30); ex.setDate(ex.getDate() + +s); return ymd(ex); }
     else return '';
@@ -1540,7 +1546,9 @@
   }
   function tSplitTalk(s) {
     s = String(s || '').trim(); var x;
+    s = s.replace(/^["“”']+|["“”']+$/g, '').trim();
     if ((x = s.match(/^(.*\S)\s*\(#?(\d{1,3})\)$/))) return { number: x[2], title: x[1] };
+    if ((x = s.match(/^["“”']?(.*?\S)["“”']?\s+[-–—]\s*(\d{1,3})$/))) return { number: x[2], title: x[1] };
     if ((x = s.match(/^(?:no\.?\s*|#)?(\d{1,3})(?:[\s.:\-–]+(.*))?$/i))) return { number: x[1], title: (x[2] || '').trim() };
     return { number: '', title: s };
   }
@@ -1590,8 +1598,14 @@
     var blocks = [], cur = null, label = '', bad = [];
     text.split(/\r?\n/).forEach(function (raw, i) {
       var l = raw.trim(); if (!l) return;
-      var dt = tParseDate(l.replace(/\s+at\s+.*$/i, ''));
-      if (dt) { cur = { date: dt, f: {}, line: i + 1, extra: [] }; blocks.push(cur); label = ''; return; }
+      var dm = l.match(/^((?:(?:sun|mon|tue|wed|thu|fri|sat)[a-z]*\.?,?\s*)?(?:[a-z]{3,9}\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*(?:19|20)\d{2}(?!\d))?|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{4}-\d{2}-\d{2}))(?:\s+(.*))?$/i);
+      var dt = dm && tParseDate(dm[1]);
+      if (dt) {
+        cur = { date: dt, f: {}, line: i + 1, extra: [] }; blocks.push(cur); label = '';
+        var rest = (dm[2] || '').replace(/^at\s+/i, '').trim();
+        if (rest && !/^\d{1,2}:\d{2}\s*(am|pm)?$/i.test(rest)) cur.f.datetalk = [rest];
+        return;
+      }
       if (!cur) { cur = { date: '', f: {}, line: i + 1, extra: [] }; blocks.push(cur); }
       var m = l.match(LABEL);
       if (m && (m[2] === '' || l.indexOf(':') > 0)) {
@@ -1607,18 +1621,29 @@
     var items = [];
     blocks.forEach(function (b) {
       var f = function (k) { return (b.f[k] || [])[0] || ''; };
+      // "David Packard (Maumee, Ohio)" → speaker and congregation
+      var sp = f('speaker').match(/^(.*?)\s*\(([^)]*)\)\s*$/);
+      if (sp && !/^(confirmed|unconfirmed)$/i.test(sp[2])) { b.f.speaker = [sp[1]]; if (!f('congregation')) b.f.congregation = [sp[2]]; }
+      var hg = f('hospitality') ? tGroupOf(f('hospitality').replace(/\s*\((un)?confirmed\)\s*$/i, '')) : '';
+      if (hg) b.f.hospitality = [];
       var none = !f('speaker') && b.extra.filter(function (x) { return T_NONE.test(x); })[0];
-      if (!b.date) { if (f('speaker') || (b.f.away || []).length) bad.push({ line: b.line, why: 'No date found', text: f('speaker') }); return; }
+      if (!b.date) { if (f('speaker') || (b.f.away || []).length || hg) bad.push({ line: b.line, why: 'No date found', text: f('speaker') }); return; }
       if (f('speaker') || none) {
-        var t = tSplitTalk(f('title') || f('talk'));
+        var t = tSplitTalk(f('title') || f('talk') || f('datetalk'));
         var notes = [['Chairman', f('chairman')], ['Opening prayer', f('opening prayer')], ['Closing prayer', f('closing prayer')], ['Hospitality', f('hospitality')]]
           .filter(function (x) { return x[1]; }).map(function (x) { return x[0] + ': ' + x[1]; }).concat(b.f.notes || []).join('. ');
         items.push(none ? { dir: 'in', date: b.date, none: true, reason: none, line: b.line }
           : { dir: 'in', date: b.date, speaker: f('speaker'), cong: f('congregation'), number: t.number, title: t.title, notes: notes, line: b.line });
       }
+      if (hg) items.push({ dir: 'hosp', date: b.date, group: hg, line: b.line });
       (b.f.away || []).forEach(function (a) {
-        var x = a.match(/^(.*?)\s*\((.*)\)\s*$/);
-        items.push({ dir: 'out', date: b.date, speaker: x ? x[1] : a, cong: x ? x[2] : '', line: b.line });
+        var x = a.match(/^(.*?)\s*\((.*)\)\s*$/), parts = x ? x[2].split('|').map(function (s) { return s.trim(); }) : [];
+        var it = { dir: 'out', date: b.date, speaker: x ? x[1] : a, cong: parts[0] || '', line: b.line };
+        parts.slice(1).forEach(function (p) {
+          if (/^\d{1,2}:\d{2}\s*(am|pm)?$/i.test(p)) it.time = p;
+          else { var tt = tSplitTalk(p); it.number = tt.number; it.title = tt.title; }
+        });
+        items.push(it);
       });
     });
     return { items: items, bad: bad };
@@ -1679,7 +1704,15 @@
   function tPlanImport(text, defDir, replace) {
     var p = tParseImport(text, defDir), plan = { ins: [], outs: [], skip: p.bad.slice() }, seenIn = {}, seenOut = {};
     var outs = tOutAll();
+    plan.hosp = [];
     p.items.forEach(function (it) {
+      if (it.dir === 'hosp') {
+        var hw = tWeekKey(it.date), cur = tHosp(hw);
+        if (cur && cur.group === it.group) return;
+        if (cur && !replace) return plan.skip.push({ line: it.line, why: 'Hospitality already set', text: tShort(hw) + ': ' + tGroupLabel(cur.group) });
+        plan.hosp.push({ date: hw, group: it.group, replaces: !!cur });
+        return;
+      }
       if (it.dir === 'out') {
         var b = tFindBro(it.speaker);
         if (!b) return plan.skip.push({ line: it.line, why: 'Not one of our brothers', text: it.speaker });
@@ -1713,6 +1746,9 @@
     }).concat(plan.outs.map(function (o) {
       return '<div class="row-plain"><span style="white-space:nowrap">' + esc(tShort(o.date)) + ' · Out</span><span>' + esc(o.brotherName + (o.toCong ? ' → ' + o.toCong : '') + (o.number ? ' #' + o.number : '')) + '</span></div>';
     }));
+    rows = rows.concat((plan.hosp || []).map(function (x) {
+      return '<div class="row-plain"><span style="white-space:nowrap">' + esc(tShort(x.date)) + ' · Hosp.</span><span>' + esc(tGroupLabel(x.group)) + (x.replaces ? ' <span class="flag">replaces</span>' : '') + '</span></div>';
+    }));
     var h = rows.length ? '<h2 class="label" style="margin:16px 18px 8px">Ready to add · ' + rows.length + '</h2><div class="glass list">' + rows.join('') + '</div>' : '';
     if (plan.skip.length) {
       h += '<h2 class="label" style="margin:16px 18px 8px">Left out · ' + plan.skip.length + '</h2><div class="glass list">' + plan.skip.map(function (s) {
@@ -1725,7 +1761,7 @@
     var sh = S.sheet; if (!sh || sh.type !== 't-import') return;
     var el = document.getElementById('t-imp-text'); if (el) sh.text = el.value;
     var rp = document.getElementById('t-imp-replace'); sh.replace = !!(rp && rp.checked);
-    var plan = tPlanImport(sh.text || '', sh.dir, sh.replace), n = plan.ins.length + plan.outs.length;
+    var plan = tPlanImport(sh.text || '', sh.dir, sh.replace), n = plan.ins.length + plan.outs.length + plan.hosp.length;
     var pv = document.getElementById('t-imp-preview'); if (pv) pv.innerHTML = tImpPreviewHtml(plan);
     var go = document.getElementById('t-imp-go');
     if (go) { go.disabled = !n; go.textContent = n ? 'Add ' + n + (n === 1 ? ' talk' : ' talks') : 'Add talks'; }
@@ -1749,25 +1785,119 @@
     't-imp-dir': function (el) { tImpRefresh(); S.sheet.dir = el.dataset.dir; renderSheet(); tImpRefresh(); },
     't-imp-go': function () {
       tImpRefresh();
-      var sh = S.sheet, plan = tPlanImport(sh.text || '', sh.dir, sh.replace), jobs = [], titles = Object.assign({}, tTitles()), nt = false;
-      var n = plan.ins.length + plan.outs.length; if (!n) return;
-      plan.ins.forEach(function (x) {
-        jobs.push(store.putTalk('talk_in_' + x.body.date, x.body));
-        if (x.body.number && x.body.title && titles[x.body.number] !== x.body.title) { titles[x.body.number] = x.body.title; nt = true; }
-      });
-      plan.outs.forEach(function (o, i) {
-        jobs.push(store.putTalk('talk_out_' + Date.now().toString(36) + i + Math.random().toString(36).slice(2, 6), o));
-        if (o.number && o.title && titles[o.number] !== o.title) { titles[o.number] = o.title; nt = true; }
-      });
-      if (nt) jobs.push(store.putTalk('talktitles', { map: titles }));
-      var first = plan.ins.map(function (x) { return x.body.date; }).concat(plan.outs.map(function (o) { return o.date; })).sort()[0];
-      Promise.all(jobs).then(function () {
-        closeSheet(); S.tPart = plan.ins.length ? 'year' : 'out'; if (first) S.tYear = +first.slice(0, 4); S.tScrolled = false; render();
-        toast(n + (n === 1 ? ' talk' : ' talks') + ' added');
+      var sh = S.sheet, plan = tPlanImport(sh.text || '', sh.dir, sh.replace);
+      tSavePlan(plan).then(function (n) {
+        if (!n) return;
+        closeSheet(); S.tPart = plan.ins.length || plan.hosp.length ? 'year' : 'out'; if (plan.first) S.tYear = +plan.first.slice(0, 4); S.tScrolled = false; render();
+        toast(n + (plan.hosp.length ? (n === 1 ? ' item' : ' items') : (n === 1 ? ' talk' : ' talks')) + ' added to Talks');
       }, function (e) { toast(window.EmbraceStore.friendly(e)); });
     }
   };
+  // Save what an import found. Talk titles only fill numbers the title list doesn't have yet.
+  function tSavePlan(plan) {
+    var jobs = [], titles = Object.assign({}, tTitles()), nt = false;
+    var n = plan.ins.length + plan.outs.length + (plan.hosp || []).length;
+    if (!n) return Promise.resolve(0);
+    var title = function (num, t) { if (num && t && !titles[num]) { titles[num] = t; nt = true; } };
+    plan.ins.forEach(function (x) { jobs.push(store.putTalk('talk_in_' + x.body.date, x.body)); title(x.body.number, x.body.title); });
+    plan.outs.forEach(function (o, i) { jobs.push(store.putTalk('talk_out_' + Date.now().toString(36) + i + Math.random().toString(36).slice(2, 6), o)); title(o.number, o.title); });
+    (plan.hosp || []).forEach(function (x) { jobs.push(store.putTalk('talk_hosp_' + x.date, { date: x.date, group: x.group })); });
+    if (nt) jobs.push(store.putTalk('talktitles', { map: titles }));
+    plan.first = plan.ins.map(function (x) { return x.body.date; }).concat(plan.outs.map(function (o) { return o.date; }), (plan.hosp || []).map(function (x) { return x.date; })).sort()[0];
+    return Promise.all(jobs).then(function () { return n; });
+  }
   Object.keys(TA_IMPORT).forEach(function (k) { TA[k] = TA_IMPORT[k]; });
+
+  /* ---------------- Talks: hospitality ----------------
+     Each weekend can have a group responsible for hospitality (doc talk_hosp_<date>: { date, group, texted }).
+     Groups are named after their overseer in the roster ("Randy Kirby", "J. Bauman").
+     One brother (talkcfg.remindId) gets a reminder in the week before to text that group's overseer. */
+  function tHosp(date) { return tDocs()['talk_hosp_' + date] || null; }
+  function tGroups() {
+    var g = {}; S.data.publishers.forEach(function (p) { if (p.group && !isVisitor(p)) g[p.group] = 1; });
+    return Object.keys(g).sort(function (a, b) { return tLast(a).localeCompare(tLast(b)) || a.localeCompare(b); });
+  }
+  // The overseer of a group: the brother whose name the group carries ("J. Bauman" → Jeff Bauman).
+  function tOverseer(group) {
+    if (!group) return null;
+    var g = tNormName(group), gw = g.split(' '), last = gw[gw.length - 1], init = (gw[0] || '').charAt(0);
+    var bros = S.data.publishers.filter(function (p) { return p.group === group && (p.rank === 'Elder' || p.rank === 'Ministerial Servant'); });
+    var pool = bros.length ? bros : tSpeakers();
+    return pool.filter(function (p) { return tNormName(p.name) === g; })[0] ||
+      pool.filter(function (p) { var w = tNormName(p.name).split(' '); return w[w.length - 1] === last && w[0].charAt(0) === init; })[0] || null;
+  }
+  // A name from a schedule ("Jeff Bauman", "J. Bauman", "Randy Kirby") → the roster's group name.
+  function tGroupOf(name) {
+    var n = tNormName(name); if (!n) return '';
+    var gs = tGroups(), w = n.split(' ');
+    var exact = gs.filter(function (g) { return tNormName(g) === n; })[0]; if (exact) return exact;
+    var byOv = gs.filter(function (g) { var o = tOverseer(g); return o && tNormName(o.name) === n; })[0]; if (byOv) return byOv;
+    var loose = gs.filter(function (g) { var gw = tNormName(g).split(' '); return gw[gw.length - 1] === w[w.length - 1] && gw[0].charAt(0) === w[0].charAt(0); });
+    return loose.length === 1 ? loose[0] : '';
+  }
+  function tGroupLabel(group) { var o = tOverseer(group); return (o ? o.name : group) + '’s group'; }
+  function tHospText(date) {
+    var hs = tHosp(date); if (!hs) return '';
+    var o = tOverseer(hs.group), t = tIn(date), m = me(), c = tCfg();
+    var d = parseDay(date), days = Math.round((d - parseDay(todayStr())) / 864e5);
+    var when = (days >= 0 && days < 7 ? 'this ' + DOW[d.getDay()] : 'on ' + DOW[d.getDay()]) + ', ' + MON[d.getMonth()] + ' ' + d.getDate();
+    var who = t && t.speaker ? (t.type === 'local' ? ', when Brother ' + t.speaker + ' gives the public talk' : ' for our visiting speaker, Brother ' + t.speaker + (t.fromCong ? ' from ' + t.fromCong : '')) : '';
+    return 'Hi ' + (o ? firstName(o.name) : 'Brother') + ', just a friendly reminder that your group has hospitality ' + when + who + '. The meeting starts at ' + fmtTime(c.time) + '. Thank you!' + (m ? ' - ' + firstName(m.name) : '');
+  }
+  // The reminder card: only for the brother who turned reminders on, during the week before.
+  function tHospReminders() {
+    var c = tCfg(); if (!c.remindId || c.remindId !== S.meId) return [];
+    var today = todayStr(), end = ymd(new Date(parseDay(today).getTime() + 7 * 864e5));
+    return Object.keys(tDocs()).filter(function (k) { return k.indexOf('talk_hosp_') === 0; }).map(function (k) { return tDocs()[k]; })
+      .filter(function (h) { return h && h.group && !h.texted && h.date >= today && h.date <= end; })
+      .sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+  }
+  function tHospCard() {
+    return tHospReminders().map(function (h) {
+      var o = tOverseer(h.group), ph = o ? digits(o.phone) : '';
+      return '<div class="glass hosp-card rise"><div class="hosp-top"><span class="hosp-ico" aria-hidden="true">' + I.talks + '</span><span class="txt"><b>Hospitality reminder</b>' +
+        '<small>' + esc(tGroupLabel(h.group)) + ' has hospitality ' + esc(longDate(h.date)) + '</small></span></div>' +
+        '<div class="hosp-btns">' + (ph.length >= 10 ? '<button class="cta" data-action="t-hosp-text" data-date="' + h.date + '">Text ' + esc(firstName(o.name)) + '</button>'
+          : '<button class="cta" data-action="t-week" data-date="' + h.date + '">Open the weekend</button>') +
+        '<button class="quiet glass" data-action="t-hosp-done" data-date="' + h.date + '">Done</button></div></div>';
+    }).join('');
+  }
+  function tHospSection(date) {
+    var hs = tHosp(date), o = hs ? tOverseer(hs.group) : null, ph = o ? digits(o.phone) : '';
+    return '<h2 class="label">Hospitality</h2><div class="glass list">' +
+      '<button class="cell" data-action="t-hosp-pick" data-date="' + date + '"><span class="txt"><b>' + (hs ? esc(tGroupLabel(hs.group)) : 'No group chosen') + '</b>' +
+      (hs && hs.texted ? '<small>Reminder sent ' + esc(fmtDate(hs.texted, true)) + '</small>' : '<small>Tap to ' + (hs ? 'change' : 'choose') + ' the group</small>') + '</span>' + I.chev + '</button>' +
+      (hs && ph.length >= 10 ? '<button class="action" data-action="t-hosp-text" data-date="' + date + '">Text ' + esc(firstName(o.name)) + ' a hospitality reminder</button>' : '') + '</div>';
+  }
+  function sheetTHosp(date) {
+    var hs = tHosp(date);
+    return tHead(tShort(date) + ' · Hospitality', null, true) + '<div class="glass list">' + tGroups().map(function (g) {
+      var on = hs && hs.group === g;
+      return '<button class="cell" data-action="t-hosp-set" data-date="' + date + '" data-group="' + esc(g) + '" aria-pressed="' + !!on + '"><span class="txt"><b>' + esc(tGroupLabel(g)) + '</b></span>' + (on ? '<span class="end">✓</span>' : '') + '</button>';
+    }).join('') + (hs ? '<button class="action danger" data-action="t-hosp-set" data-date="' + date + '" data-group="">No group this week</button>' : '') + '</div>';
+  }
+  var TA_HOSP = {
+    't-hosp-pick': function (el) { swapSheet({ type: 't-hosp', date: el.dataset.date, back: S.sheet && S.sheet.type === 't-week' ? S.sheet : null }); },
+    't-hosp-set': function (el) {
+      var d = el.dataset.date, g = el.dataset.group, job = g ? store.putTalk('talk_hosp_' + d, { date: d, group: g }) : store.removeTalk('talk_hosp_' + d);
+      job.then(function () { tBack(); toast(g ? tGroupLabel(g) + ' has hospitality' : 'Hospitality cleared'); });
+    },
+    't-hosp-text': function (el) {
+      var d = el.dataset.date, hs = tHosp(d), o = hs && tOverseer(hs.group); if (!o) return;
+      var ph = digits(o.phone); if (ph.length < 10) return toast('No phone number for ' + o.name);
+      store.putTalk('talk_hosp_' + d, Object.assign({}, hs, { texted: todayStr() }));
+      window.location.href = smsLink([ph], tHospText(d));
+    },
+    't-hosp-done': function (el) {
+      var d = el.dataset.date, hs = tHosp(d); if (!hs) return;
+      store.putTalk('talk_hosp_' + d, Object.assign({}, hs, { texted: todayStr() })).then(function () { toast('Marked as done'); });
+    },
+    't-remind': function () {
+      var on = document.getElementById('t-remind').checked;
+      store.putTalk('talkcfg', Object.assign({}, tCfg(), { remindId: on ? S.meId : '' })).then(function () { toast(on ? 'You’ll be reminded each week' : 'Reminders off'); renderSheet(); });
+    }
+  };
+  Object.keys(TA_HOSP).forEach(function (k) { TA[k] = TA_HOSP[k]; });
 
   Object.keys(TA).forEach(function (k) { A[k] = TA[k]; });
   function gateCode(c) {
@@ -1815,7 +1945,8 @@
     if (t.id === 'group-pick') { S.group = t.value; saveUi(); render(); }
     if (t.id === 's-cong') store.saveSettings({ congregationName: t.value.trim() });
     if (t.id === 's-od') store.saveSettings({ overdueDays: +t.value });
-    if (t.id === 't-time') { var tc = tCfg(); store.putTalk('talkcfg', { day: tc.day, time: t.value || '10:00' }).then(function () { toast('Saved'); }); }
+    if (t.id === 't-time') { store.putTalk('talkcfg', Object.assign({}, tCfg(), { time: t.value || '10:00' })).then(function () { toast('Saved'); }); }
+    if (t.id === 't-remind') A['t-remind']();
     if (t.id === 's-phone' && me()) store.savePublisher({ id: S.meId, phone: digits(t.value) }).then(function () { toast('Saved'); });
     if (t.classList && t.classList.contains('ask-phone')) {
       var num = digits(t.value), pid = t.dataset.pid;
@@ -1994,7 +2125,7 @@
      A link ending in #talks=... carries a schedule as JSON (never stored in the code):
      { cfg: {day, time}, in: [{date, type, speaker, fromCong, number, title, notes, reason, confirmed}] }.
      type 'local' finds our brother by name. Weekends that already have something are left alone. */
-  var pendingTalks = null;
+  var pendingTalks = null, pendingCfg = null;
   (function () {
     var h = location.hash || '';
     if (h.indexOf('#talks=') !== 0) return;
@@ -2005,10 +2136,24 @@
   function applyPendingTalks() {
     if (!pendingTalks || !S.loaded || !S.data.publishers.length) return;
     var p = pendingTalks; pendingTalks = null; lsSet('embrace-talks', null);
+    if (p.remind) {
+      var rb = tFindBro(p.remind);
+      if (rb) pendingCfg = Object.assign({}, pendingCfg || {}, { remindId: rb.id });
+    }
+    if (p.text) {
+      var plan = tPlanImport(p.text, 'in', !!p.replace), c0 = tCfg();
+      var pre = p.cfg || pendingCfg ? store.putTalk('talkcfg', Object.assign({}, c0, p.cfg || {}, pendingCfg || {})) : Promise.resolve();
+      pendingCfg = null;
+      pre.then(function () { return tSavePlan(plan); }).then(function (n) {
+        S.tab = 'talks'; S.tPart = 'year'; if (plan.first) S.tYear = +plan.first.slice(0, 4); render();
+        toast((n || 0) + ' items added to Talks' + (plan.skip.length ? ' · ' + plan.skip.length + ' already there' : ''));
+      });
+      return;
+    }
     var jobs = [], titles = Object.assign({}, tTitles()), added = 0, newTitles = false;
     if (p.cfg && (p.cfg.time || p.cfg.day != null)) {
       var c = tCfg();
-      jobs.push(store.putTalk('talkcfg', { day: p.cfg.day != null ? +p.cfg.day : c.day, time: p.cfg.time || c.time }));
+      jobs.push(store.putTalk('talkcfg', Object.assign({}, c, { day: p.cfg.day != null ? +p.cfg.day : c.day, time: p.cfg.time || c.time })));
     }
     (p.in || []).forEach(function (t) {
       if (!t || !/^\d{4}-\d{2}-\d{2}$/.test(t.date || '') || tFilled(tIn(t.date))) return;

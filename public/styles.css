@@ -398,3 +398,14 @@ textarea { display: block; width: 100%; min-height: 140px; border: none; resize:
 /* past days with a recorded visit */
 .cal-grid button.had { position: relative; color: var(--fg); }
 .cal-grid button.had::after { content: ""; position: absolute; left: 50%; bottom: 5px; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; background: var(--fg2); opacity: .7; }
+
+/* hospitality */
+.cell.week .hosp-line { color: var(--fg2); }
+.hosp-card { padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; margin-bottom: 14px; }
+.hosp-top { display: flex; align-items: center; gap: 12px; }
+.hosp-top .txt { display: flex; flex-direction: column; gap: 2px; }
+.hosp-top small { color: var(--fg2); font-size: 15px; }
+.hosp-ico { width: 40px; height: 40px; border-radius: 12px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; flex: none; }
+.hosp-ico svg { width: 24px; height: 24px; }
+.hosp-btns { display: grid; grid-template-columns: 2fr 1fr; gap: 10px; }
+.hosp-btns .cta, .hosp-btns .quiet { margin: 0; }
