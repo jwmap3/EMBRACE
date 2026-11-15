@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '5.8';
+  var VERSION = '5.9';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -676,9 +676,10 @@
       [[6, 'Saturday'], [0, 'Sunday']].map(function (o) { return '<button data-action="t-day" data-day="' + o[0] + '" aria-pressed="' + (c.day === o[0]) + '">' + o[1] + '</button>'; }).join('') + '</div></div>' +
       '<div class="field"><label for="t-time">Meeting time</label><input id="t-time" type="time" value="' + esc(c.time) + '" style="height:42px;border:none;background:transparent;font-size:17px;color:var(--fg)"></div></div>' +
       '<h2 class="label">Hospitality</h2><div class="glass list"><label class="field" for="t-auto"><span>Rotate groups automatically</span><input class="switch" id="t-auto" type="checkbox"' + (c.autoHosp !== false ? ' checked' : '') + '></label>' +
-      (c.autoHosp !== false && tNextHospGroup() ? '<div class="row-plain"><span>Next up</span><span>' + esc(tGroupLabel(tNextHospGroup())) + '</span></div>' : '') +
+      (tHospOrder().length ? '<button class="cell" data-action="t-order"><span class="txt"><b>Rotation order</b><small>' + esc(tHospOrder().map(function (g) { var o = tOverseer(g); return o ? firstName(o.name) : g; }).join(' → ')) + ' → repeat</small></span>' + I.chev + '</button>' +
+        (c.autoHosp !== false ? '<div class="row-plain"><span>Next up</span><span>' + esc(tGroupLabel(tNextHospGroup())) + '</span></div>' : '') : '') +
       '<label class="field" for="t-remind"><span>Remind me to text the hospitality group</span><input class="switch" id="t-remind" type="checkbox"' + (c.remindId && c.remindId === S.meId ? ' checked' : '') + '></label></div>' +
-      '<p class="foot" style="text-align:left;margin-top:-8px">' + (c.autoHosp !== false ? 'Each new upcoming speaker gets the group whose turn was longest ago. ' : '') + (c.remindId && c.remindId !== S.meId && pub(c.remindId) ? 'Reminders go to ' + esc(pub(c.remindId).name) + ' now. Turning this on moves them to you.' : 'In the week before each weekend, Home shows a reminder with a ready-made text to that group’s overseer. Only you see it.') + '</p>' +
+      '<p class="foot" style="text-align:left;margin-top:-8px">' + (c.autoHosp !== false ? 'Each new upcoming speaker gets the next group in the order, after the group that had the weekend before. ' : '') + (c.remindId && c.remindId !== S.meId && pub(c.remindId) ? 'Reminders go to ' + esc(pub(c.remindId).name) + ' now. Turning this on moves them to you.' : 'In the week before each weekend, Home shows a reminder with a ready-made text to that group’s overseer. Only you see it.') + '</p>' +
       '<h2 class="label">Talk titles · ' + n + ' saved</h2><div class="glass"><textarea id="t-titles" style="min-height:200px" placeholder="One talk per line, number first:&#10;1 First title&#10;2 Second title"></textarea></div>' +
       '<p class="foot" style="text-align:left;margin-top:-8px">Paste your list of talk outlines here. After that, typing a talk number fills in its title.</p>' +
       '<p class="err" id="ts-err" role="alert" hidden></p><button class="cta" data-action="t-titles-save">Save titles</button>';
@@ -1265,6 +1266,7 @@
     else if (sh.type === 't-copy') body = sheetTCopy(sh.year);
     else if (sh.type === 't-import') body = sheetTImport(sh);
     else if (sh.type === 't-hosp') body = sheetTHosp(sh.date);
+    else if (sh.type === 't-order') body = sheetTOrder(sh);
     else if (sh.type === 't-outline') body = sheetTOutline(sh.n);
     else if (sh.type === 'plan') { var pl = planById(sh.id); if (!pl) return closeSheet(); body = sheetPlan(pl); }
     else if (sh.type === 'visits') body = sheetAllVisits();
@@ -1814,7 +1816,7 @@
       plan.ins.map(function (x) { return x.body; }).filter(function (b) {
         return b.type !== 'none' && b.speaker && b.date >= today && !tHosp(b.date) && !given.some(function (g) { return g.date === b.date; });
       }).sort(function (a, b) { return a.date < b.date ? -1 : 1; }).forEach(function (b) {
-        var g = tNextHospGroup(given); if (!g) return;
+        var g = tNextHospGroup(b.date, given); if (!g) return;
         given.push({ date: b.date, group: g });
         plan.autoHosp = (plan.autoHosp || 0) + 1;
         jobs.push(store.putTalk('talk_hosp_' + b.date, { date: b.date, group: g, auto: true }));
@@ -1853,21 +1855,32 @@
     var loose = gs.filter(function (g) { var gw = tNormName(g).split(' '); return gw[gw.length - 1] === w[w.length - 1] && gw[0].charAt(0) === w[0].charAt(0); });
     return loose.length === 1 ? loose[0] : '';
   }
-  /* Fair rotation: the group whose last hospitality is longest ago goes next
-     (a group that has never had it goes first; ties go to the group that has had it fewer times). */
+  /* Rotation: groups take hospitality in a set order (Talk settings → Rotation order) and repeat.
+     A weekend gets the group after the one that had the weekend before it. */
   function tHospAuto() { return tCfg().autoHosp !== false; }
-  function tNextHospGroup(extra) {
-    var gs = tGroups(); if (!gs.length) return '';
-    var last = {}, count = {};
-    gs.forEach(function (g) { last[g] = ''; count[g] = 0; });
-    var all = Object.keys(tDocs()).filter(function (k) { return k.indexOf('talk_hosp_') === 0; }).map(function (k) { return tDocs()[k]; }).concat(extra || []);
-    all.forEach(function (h) { if (!h || !(h.group in last)) return; count[h.group]++; if (h.date > last[h.group]) last[h.group] = h.date; });
-    return gs.slice().sort(function (a, b) { return last[a] !== last[b] ? (last[a] < last[b] ? -1 : 1) : count[a] - count[b] || gs.indexOf(a) - gs.indexOf(b); })[0];
+  function tHospAll(extra) {
+    return Object.keys(tDocs()).filter(function (k) { return k.indexOf('talk_hosp_') === 0; }).map(function (k) { return tDocs()[k]; })
+      .concat(extra || []).filter(function (h) { return h && h.group && h.date; }).sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+  }
+  function tHospOrder() {
+    var gs = tGroups(), saved = (tCfg().hospOrder || []).filter(function (g) { return gs.indexOf(g) >= 0; });
+    if (!saved.length) {
+      // no order saved yet: follow the most recent turns (each group's latest week, oldest first)
+      var lastAt = {}; tHospAll().forEach(function (h) { if (gs.indexOf(h.group) >= 0) lastAt[h.group] = h.date; });
+      saved = Object.keys(lastAt).sort(function (a, b) { return lastAt[a] < lastAt[b] ? -1 : 1; });
+    }
+    return saved.concat(gs.filter(function (g) { return saved.indexOf(g) < 0; }));
+  }
+  function tNextHospGroup(date, extra) {
+    var order = tHospOrder(); if (!order.length) return '';
+    var before = tHospAll(extra).filter(function (h) { return h.date < (date || '9999-12-31') && order.indexOf(h.group) >= 0; });
+    var prev = before[before.length - 1];
+    return prev ? order[(order.indexOf(prev.group) + 1) % order.length] : order[0];
   }
   // For a weekend that just got a speaker: give it the next group, if it's coming up and has none yet.
   function tAutoHosp(date, talk) {
     if (!tHospAuto() || !talk || talk.type === 'none' || !talk.speaker || date < todayStr() || tHosp(date)) return Promise.resolve('');
-    var g = tNextHospGroup(); if (!g) return Promise.resolve('');
+    var g = tNextHospGroup(date); if (!g) return Promise.resolve('');
     return store.putTalk('talk_hosp_' + date, { date: date, group: g, auto: true }).then(function () { return g; });
   }
   function tGroupLabel(group) { var o = tOverseer(group); return (o ? o.name : group) + '’s group'; }
@@ -1911,7 +1924,24 @@
       return '<button class="cell" data-action="t-hosp-set" data-date="' + date + '" data-group="' + esc(g) + '" aria-pressed="' + !!on + '"><span class="txt"><b>' + esc(tGroupLabel(g)) + '</b></span>' + (on ? '<span class="end">✓</span>' : '') + '</button>';
     }).join('') + (hs ? '<button class="action danger" data-action="t-hosp-set" data-date="' + date + '" data-group="">No group this week</button>' : '') + '</div>';
   }
+  function sheetTOrder(sh) {
+    var picked = sh.picked, gs = tGroups();
+    return tHead('Rotation Order', null, true) +
+      '<p class="sub" style="text-align:center;margin:-6px 0 12px">Tap the groups in the order they take hospitality.</p><div class="glass list">' + gs.map(function (g) {
+        var i = picked.indexOf(g);
+        return '<button class="cell" data-action="t-order-tap" data-group="' + esc(g) + '"><span class="datechip" aria-hidden="true"><b>' + (i >= 0 ? i + 1 : '·') + '</b></span><span class="txt"><b>' + esc(tGroupLabel(g)) + '</b></span></button>';
+      }).join('') + '</div>' +
+      (picked.length ? '<button class="quiet glass" data-action="t-order-reset">Start over</button>' : '') +
+      '<button class="cta" data-action="t-order-save"' + (picked.length === gs.length ? '' : ' disabled') + '>Save order</button>';
+  }
   var TA_HOSP = {
+    't-order': function () { swapSheet({ type: 't-order', picked: [], back: S.sheet && S.sheet.type === 't-settings' ? S.sheet : null }); },
+    't-order-tap': function (el) { var p = S.sheet.picked, g = el.dataset.group, i = p.indexOf(g); if (i >= 0) p.splice(i, 1); else p.push(g); renderSheet(); },
+    't-order-reset': function () { S.sheet.picked = []; renderSheet(); },
+    't-order-save': function () {
+      var p = S.sheet.picked.slice();
+      store.putTalk('talkcfg', Object.assign({}, tCfg(), { hospOrder: p })).then(function () { tBack(); toast('Rotation order saved'); });
+    },
     't-hosp-pick': function (el) { swapSheet({ type: 't-hosp', date: el.dataset.date, back: S.sheet && S.sheet.type === 't-week' ? S.sheet : null }); },
     't-hosp-set': function (el) {
       var d = el.dataset.date, g = el.dataset.group, job = g ? store.putTalk('talk_hosp_' + d, { date: d, group: g }) : store.removeTalk('talk_hosp_' + d);
@@ -2292,6 +2322,10 @@
   function applyPendingTalks() {
     if (!pendingTalks || !S.loaded || !S.data.publishers.length) return;
     var p = pendingTalks; pendingTalks = null; lsSet('embrace-talks', null);
+    if (p.hospOrder && p.hospOrder.length) {
+      var ord = p.hospOrder.map(function (n) { return tGroupOf(n) || n; }).filter(function (g) { return tGroups().indexOf(g) >= 0; });
+      if (ord.length) pendingCfg = Object.assign({}, pendingCfg || {}, { hospOrder: ord });
+    }
     if (p.remind) {
       var rb = tFindBro(p.remind);
       if (rb) pendingCfg = Object.assign({}, pendingCfg || {}, { remindId: rb.id });
@@ -2303,6 +2337,12 @@
         if (!p.text) { S.tab = 'talks'; S.tPart = 'outlines'; render(); toast(tn + ' outlines saved'); }
       });
       if (!p.text) return;
+    }
+    if (!p.text && !p.titles && (pendingCfg || p.cfg)) {
+      store.putTalk('talkcfg', Object.assign({}, tCfg(), p.cfg || {}, pendingCfg || {})).then(function () {
+        S.tab = 'talks'; render(); toast('Talk settings updated');
+      });
+      pendingCfg = null; return;
     }
     if (p.text) {
       var plan = tPlanImport(p.text, 'in', !!p.replace), c0 = tCfg();
