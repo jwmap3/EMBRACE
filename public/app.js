@@ -1830,14 +1830,14 @@
 
   /* ---------------- Talks: hospitality ----------------
      Each weekend can have a group responsible for hospitality (doc talk_hosp_<date>: { date, group, texted }).
-     Groups are named after their overseer in the roster ("Randy Kirby", "J. Bauman").
+     Groups are named after their overseer in the roster ("John Smith", "J. Smith").
      One brother (talkcfg.remindId) gets a reminder in the week before to text that group's overseer. */
   function tHosp(date) { return tDocs()['talk_hosp_' + date] || null; }
   function tGroups() {
     var g = {}; S.data.publishers.forEach(function (p) { if (p.group && !isVisitor(p)) g[p.group] = 1; });
     return Object.keys(g).sort(function (a, b) { return tLast(a).localeCompare(tLast(b)) || a.localeCompare(b); });
   }
-  // The overseer of a group: the brother whose name the group carries ("J. Bauman" → Jeff Bauman).
+  // The overseer of a group: the brother whose name the group carries ("J. Smith" → John Smith).
   function tOverseer(group) {
     if (!group) return null;
     var g = tNormName(group), gw = g.split(' '), last = gw[gw.length - 1], init = (gw[0] || '').charAt(0);
@@ -1846,7 +1846,7 @@
     return pool.filter(function (p) { return tNormName(p.name) === g; })[0] ||
       pool.filter(function (p) { var w = tNormName(p.name).split(' '); return w[w.length - 1] === last && w[0].charAt(0) === init; })[0] || null;
   }
-  // A name from a schedule ("Jeff Bauman", "J. Bauman", "Randy Kirby") → the roster's group name.
+  // A name from a schedule ("John Smith", "J. Smith") → the roster's group name.
   function tGroupOf(name) {
     var n = tNormName(name); if (!n) return '';
     var gs = tGroups(), w = n.split(' ');
