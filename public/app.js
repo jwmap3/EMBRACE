@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '5.9';
+  var VERSION = '5.10';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -1660,7 +1660,7 @@
   function tParseImport(text, defDir) {
     text = String(text || '');
     if (!text.trim()) return { items: [], bad: [] };
-    if (/^\s*(speaker|congregation|title|away speakers?)\s*:?\s*$/im.test(text) || /^\s*(speaker|congregation)\s*:\s*\S/im.test(text)) return tBlocks(text);
+    if (/^\s*(speaker|congregation|title|away speakers?)\s*:?\s*$/im.test(text) || /^\s*(speaker|congregation|away speakers?|hospitality|chairman)\s*:\s*\S/im.test(text)) return tBlocks(text);
     var rows = tTableRows(text), items = [], bad = [], map = null, start = 0;
     var first = rows[0] || [];
     if (!first.some(function (c) { return tParseDate(c); })) {
@@ -2322,6 +2322,14 @@
   function applyPendingTalks() {
     if (!pendingTalks || !S.loaded || !S.data.publishers.length) return;
     var p = pendingTalks; pendingTalks = null; lsSet('embrace-talks', null);
+    // corrections to talks already in Embrace: { "talk_in_2027-01-17": { speaker: "..." } } (only changes what's listed)
+    var patched = 0;
+    if (p.patch && typeof p.patch === 'object') Object.keys(p.patch).forEach(function (id) {
+      var cur = tDocs()[id];
+      if (!/^talk_(in|out|hosp)_/.test(id) || !cur || typeof p.patch[id] !== 'object') return;
+      patched++; store.putTalk(id, Object.assign({}, cur, p.patch[id]));
+    });
+    if (patched && !p.text && !p.titles && !p.hospOrder && !p.cfg) { S.tab = 'talks'; render(); toast(patched + (patched === 1 ? ' talk' : ' talks') + ' updated'); return; }
     if (p.hospOrder && p.hospOrder.length) {
       var ord = p.hospOrder.map(function (n) { return tGroupOf(n) || n; }).filter(function (g) { return tGroups().indexOf(g) >= 0; });
       if (ord.length) pendingCfg = Object.assign({}, pendingCfg || {}, { hospOrder: ord });
