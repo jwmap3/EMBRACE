@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '5.10';
+  var VERSION = '5.11';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -537,7 +537,7 @@
       '<div class="duo"><div class="glass tile" style="cursor:default"><span class="tile-label">Incoming</span><b>' + have + '<small> of ' + wk.length + '</small></b>' +
       '<span class="bar"><i style="width:' + Math.round(have / wk.length * 100) + '%"></i></span><span class="tile-sub">weekends planned</span></div>' +
       '<div class="glass tile" style="cursor:default"><span class="tile-label">Outgoing</span><b>' + outCount + '</b><span class="tile-sub">talks by our brothers</span></div></div>';
-    h += tHospCard();
+    h += tHospCard() + tChangesCard();
     if (y === new Date().getFullYear() && soon.length) {
       h += '<button class="cta" data-action="t-week" data-date="' + soon[0] + '">' + I.plus + 'Fill ' + esc(longDate(soon[0])) + '</button>' +
         '<p class="foot" style="margin-top:-8px">' + soon.length + (soon.length === 1 ? ' weekend' : ' weekends') + ' in the next 3 months still need a speaker.</p>';
@@ -675,6 +675,7 @@
       '<div class="glass list"><div style="padding:12px 18px;display:flex;flex-direction:column;gap:8px"><span>Public meeting day</span><div class="seg" role="group" aria-label="Meeting day">' +
       [[6, 'Saturday'], [0, 'Sunday']].map(function (o) { return '<button data-action="t-day" data-day="' + o[0] + '" aria-pressed="' + (c.day === o[0]) + '">' + o[1] + '</button>'; }).join('') + '</div></div>' +
       '<div class="field"><label for="t-time">Meeting time</label><input id="t-time" type="time" value="' + esc(c.time) + '" style="height:42px;border:none;background:transparent;font-size:17px;color:var(--fg)"></div></div>' +
+      '<h2 class="label">Schedule changes</h2><div class="glass list"><button class="cell" data-action="t-changes"><span class="txt"><b>Changes log</b><small>' + (tPendingLogs().length ? tPendingLogs().length + ' not sent yet' : 'All sent') + (tChangesTo() ? ' · goes to ' + esc(tChangesTo().name) : '') + '</small></span>' + I.chev + '</button></div>' +
       '<h2 class="label">Hospitality</h2><div class="glass list"><label class="field" for="t-auto"><span>Rotate groups automatically</span><input class="switch" id="t-auto" type="checkbox"' + (c.autoHosp !== false ? ' checked' : '') + '></label>' +
       (tHospOrder().length ? '<button class="cell" data-action="t-order"><span class="txt"><b>Rotation order</b><small>' + esc(tHospOrder().map(function (g) { var o = tOverseer(g); return o ? firstName(o.name) : g; }).join(' → ')) + ' → repeat</small></span>' + I.chev + '</button>' +
         (c.autoHosp !== false ? '<div class="row-plain"><span>Next up</span><span>' + esc(tGroupLabel(tNextHospGroup())) + '</span></div>' : '') : '') +
@@ -715,15 +716,32 @@
   }
   function tRedraw() { tKeep(); renderSheet(); tRestore(); }
   function tVal(id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; }
+  // The title list is the outline database: a talk only adds a number it doesn't have yet, never changes one.
   function tSaveTitle(num, title) {
     var map = tTitles();
-    if (!num || !title || map[num] === title) return Promise.resolve();
+    if (!num || !title || map[num]) return Promise.resolve();
     var next = Object.assign({}, map); next[num] = title;
     return store.putTalk('talktitles', { map: next });
   }
+  // Typing a talk number always brings its title from the list; an unknown number clears a title left from the old number.
   function tFillTitle(numId, titleId) {
-    var t = tTitles()[tVal(numId).replace(/\D/g, '')], el = document.getElementById(titleId);
-    if (t && el && !el.dataset.typed) el.value = t;
+    var n = tVal(numId).replace(/\D/g, ''), t = tTitles()[n], el = document.getElementById(titleId);
+    if (!el || el.dataset.typed) return;
+    el.value = t && !tOutlineRetired(t) ? t : '';
+  }
+  /* Keep every talk's title matching the outline list (once the full list is in): a talk saved with
+     the wrong title for its number is corrected. "Do not use" outlines are left alone. */
+  var tFixing = {};
+  function tFixTitles() {
+    var map = tTitles(); if (Object.keys(map).length < 150) return;
+    var docs = tDocs();
+    Object.keys(docs).forEach(function (k) {
+      if (!/^talk_(in|out)_/.test(k)) return;
+      var t = docs[k], right = t && t.number && map[t.number];
+      if (!right || tOutlineRetired(right) || t.title === right || tFixing[k + right]) return;
+      tFixing[k + right] = true;
+      store.putTalk(k, Object.assign({}, t, { title: right }));
+    });
   }
   function tBack() { var b = S.sheet && S.sheet.back; if (b) swapSheet(b); else closeSheet(); }
   var TA = {
@@ -756,12 +774,12 @@
         }
         body.number = tVal('ti-num').replace(/\D/g, ''); body.title = tVal('ti-title'); body.notes = tVal('ti-notes');
       }
-      var hg = '';
-      store.putTalk('talk_in_' + sh.date, body).then(function () { return tSaveTitle(body.number, body.title); })
-        .then(function () { return tAutoHosp(sh.date, body).then(function (g) { hg = g; }); })
+      var hg = '', old = tIn(sh.date) ? Object.assign({}, tIn(sh.date)) : null;
+      store.putTalk('talk_in_' + sh.date, body).then(function () { tLogIn(sh.date, old, body); return tSaveTitle(body.number, body.title); })
+        .then(function () { return tAutoHosp(sh.date, body).then(function (g) { hg = g; if (g) tLogHosp(sh.date, '', g); }); })
         .then(function () { tBack(); toast(hg ? 'Saved · ' + tGroupLabel(hg) + ' has hospitality' : 'Saved'); }, function (e) { showErr('ti-err', window.EmbraceStore.friendly(e)); });
     },
-    't-in-delete': function () { store.removeTalk('talk_in_' + S.sheet.date).then(function () { tBack(); toast('Weekend cleared'); }); },
+    't-in-delete': function () { var d = S.sheet.date, old = tIn(d) ? Object.assign({}, tIn(d)) : null; store.removeTalk('talk_in_' + d).then(function () { tLogIn(d, old, null); tBack(); toast('Weekend cleared'); }); },
     't-in-text': function (el) {
       var t = tIn(el.dataset.date), m = me(); if (!t) return;
       var body = (t.type === 'local' ? 'Hi ' + firstName(t.speaker) : 'Hi Brother ' + tLast(t.speaker)) + ', ' +
@@ -785,11 +803,12 @@
       if (!date) return showErr('to-err', 'Pick the date.');
       var body = { brotherId: b.id, brotherName: b.name, toCong: tVal('to-cong'), date: date, time: tVal('to-time'),
         number: tVal('to-num').replace(/\D/g, ''), title: tVal('to-title'), notes: tVal('to-notes') };
+      var oldO = sh.id && tDocs()[sh.id] ? Object.assign({}, tDocs()[sh.id]) : null;
       store.putTalk(sh.id || 'talk_out_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), body)
-        .then(function () { return tSaveTitle(body.number, body.title); })
+        .then(function () { tLogOut(oldO, body); return tSaveTitle(body.number, body.title); })
         .then(function () { tBack(); toast('Saved'); }, function (e) { showErr('to-err', window.EmbraceStore.friendly(e)); });
     },
-    't-out-delete': function () { store.removeTalk(S.sheet.id).then(function () { tBack(); toast('Removed'); }); },
+    't-out-delete': function () { var id = S.sheet.id, oldO = tDocs()[id] ? Object.assign({}, tDocs()[id]) : null; store.removeTalk(id).then(function () { tLogOut(oldO, null); tBack(); toast('Removed'); }); },
     't-out-text': function () {
       var o = tDocs()[S.sheet.id], b = o && pub(o.brotherId), m = me(); if (!b) return;
       var body = 'Hi ' + firstName(b.name) + ', reminder: your public talk' + (tLabel(o) ? ' ' + tLabel(o) : '') + (o.toCong ? ' at ' + o.toCong : '') +
@@ -1267,6 +1286,8 @@
     else if (sh.type === 't-import') body = sheetTImport(sh);
     else if (sh.type === 't-hosp') body = sheetTHosp(sh.date);
     else if (sh.type === 't-order') body = sheetTOrder(sh);
+    else if (sh.type === 't-changes') body = sheetTChanges();
+    else if (sh.type === 't-changes-to') body = sheetTChangesTo();
     else if (sh.type === 't-outline') body = sheetTOutline(sh.n);
     else if (sh.type === 'plan') { var pl = planById(sh.id); if (!pl) return closeSheet(); body = sheetPlan(pl); }
     else if (sh.type === 'visits') body = sheetAllVisits();
@@ -1728,7 +1749,8 @@
         var key = b.id + '|' + it.date;
         if (seenOut[key] || outs.some(function (o) { return o.brotherId === b.id && o.date === it.date; })) return plan.skip.push({ line: it.line, why: 'Already in Embrace', text: b.name + ', ' + tShort(it.date) });
         seenOut[key] = 1;
-        plan.outs.push({ brotherId: b.id, brotherName: b.name, toCong: it.cong || '', date: it.date, time: tTime24(it.time), number: it.number || '', title: it.title || '', notes: it.notes || '' });
+        var olt = it.number && tTitles()[it.number];
+        plan.outs.push({ brotherId: b.id, brotherName: b.name, toCong: it.cong || '', date: it.date, time: tTime24(it.time), number: it.number || '', title: olt && !tOutlineRetired(olt) ? olt : it.title || '', notes: it.notes || '' });
         return;
       }
       var wk = tWeekKey(it.date);
@@ -1742,7 +1764,8 @@
         var ours = tFindBro(it.speaker), home = !it.cong || tNormName(it.cong).indexOf(tNormName(tShortCong())) >= 0;
         if (ours && home && (ours.rank === 'Elder' || ours.rank === 'Ministerial Servant')) { body.type = 'local'; body.speaker = ours.name; body.localId = ours.id; body.phone = digits(ours.phone); body.confirmed = true; }
         else { body.type = 'visitor'; body.speaker = it.speaker.replace(/\s+/g, ' '); body.fromCong = it.cong || ''; body.phone = ''; body.confirmed = false; }
-        body.number = it.number || ''; body.title = it.title || (it.number && tTitles()[it.number]) || ''; body.notes = it.notes || '';
+        var lt = it.number && tTitles()[it.number];
+        body.number = it.number || ''; body.title = lt && !tOutlineRetired(lt) ? lt : it.title || ''; body.notes = it.notes || '';
       }
       plan.ins.push({ body: body, replaces: had });
     });
@@ -1808,9 +1831,9 @@
     var n = plan.ins.length + plan.outs.length + (plan.hosp || []).length;
     if (!n) return Promise.resolve(0);
     var title = function (num, t) { if (num && t && !titles[num]) { titles[num] = t; nt = true; } };
-    plan.ins.forEach(function (x) { jobs.push(store.putTalk('talk_in_' + x.body.date, x.body)); title(x.body.number, x.body.title); });
-    plan.outs.forEach(function (o, i) { jobs.push(store.putTalk('talk_out_' + Date.now().toString(36) + i + Math.random().toString(36).slice(2, 6), o)); title(o.number, o.title); });
-    (plan.hosp || []).forEach(function (x) { jobs.push(store.putTalk('talk_hosp_' + x.date, { date: x.date, group: x.group })); });
+    plan.ins.forEach(function (x) { var old = tIn(x.body.date) ? Object.assign({}, tIn(x.body.date)) : null; jobs.push(store.putTalk('talk_in_' + x.body.date, x.body)); jobs.push(tLogIn(x.body.date, old, x.body)); title(x.body.number, x.body.title); });
+    plan.outs.forEach(function (o, i) { jobs.push(store.putTalk('talk_out_' + Date.now().toString(36) + i + Math.random().toString(36).slice(2, 6), o)); jobs.push(tLogOut(null, o)); title(o.number, o.title); });
+    (plan.hosp || []).forEach(function (x) { var oldG = (tHosp(x.date) || {}).group || ''; jobs.push(store.putTalk('talk_hosp_' + x.date, { date: x.date, group: x.group })); jobs.push(tLogHosp(x.date, oldG, x.group)); });
     if (tHospAuto()) {
       var given = (plan.hosp || []).map(function (x) { return { date: x.date, group: x.group }; }), today = todayStr();
       plan.ins.map(function (x) { return x.body; }).filter(function (b) {
@@ -1820,6 +1843,7 @@
         given.push({ date: b.date, group: g });
         plan.autoHosp = (plan.autoHosp || 0) + 1;
         jobs.push(store.putTalk('talk_hosp_' + b.date, { date: b.date, group: g, auto: true }));
+        jobs.push(tLogHosp(b.date, '', g));
       });
     }
     if (nt) jobs.push(store.putTalk('talktitles', { map: titles }));
@@ -1944,8 +1968,8 @@
     },
     't-hosp-pick': function (el) { swapSheet({ type: 't-hosp', date: el.dataset.date, back: S.sheet && S.sheet.type === 't-week' ? S.sheet : null }); },
     't-hosp-set': function (el) {
-      var d = el.dataset.date, g = el.dataset.group, job = g ? store.putTalk('talk_hosp_' + d, { date: d, group: g }) : store.removeTalk('talk_hosp_' + d);
-      job.then(function () { tBack(); toast(g ? tGroupLabel(g) + ' has hospitality' : 'Hospitality cleared'); });
+      var d = el.dataset.date, g = el.dataset.group, oldG = (tHosp(d) || {}).group || '', job = g ? store.putTalk('talk_hosp_' + d, { date: d, group: g }) : store.removeTalk('talk_hosp_' + d);
+      job.then(function () { tLogHosp(d, oldG, g); tBack(); toast(g ? tGroupLabel(g) + ' has hospitality' : 'Hospitality cleared'); });
     },
     't-hosp-text': function (el) {
       var d = el.dataset.date, hs = tHosp(d), o = hs && tOverseer(hs.group); if (!o) return;
@@ -2072,6 +2096,107 @@
     't-omore': function () { S.tOMore = true; tOutlineRefresh(); }
   };
   Object.keys(TA_OUT).forEach(function (k) { TA[k] = TA_OUT[k]; });
+
+  /* ---------------- Talks: change log ----------------
+     Every change to the talk schedule is noted (doc talk_log_*: { at, by, byName, wk, text }).
+     Changes made since the last "send" can go to one brother (talkcfg.changesTo, normally the
+     coordinator) as a ready-made text, so his own schedule stays in step. */
+  function tKeyIn(t) { return t ? [t.type, t.speaker || '', t.fromCong || '', t.number || '', t.reason || ''].join('|') : ''; }
+  function tDescIn(t) {
+    if (!t) return '';
+    if (t.type === 'none') return 'No talk' + (t.reason ? ' (' + t.reason + ')' : '');
+    return t.speaker + (t.type === 'local' ? ' (our speaker)' : t.fromCong ? ' (' + t.fromCong + ')' : '') + (t.number ? ', #' + t.number + (t.title ? ' ' + t.title : '') : '');
+  }
+  function tKeyOut(o) { return o ? [o.brotherId, o.toCong || '', o.date, o.time || '', o.number || ''].join('|') : ''; }
+  function tDescOut(o) {
+    if (!o) return '';
+    var b = pub(o.brotherId);
+    return (b ? b.name : o.brotherName || '') + (o.toCong ? ' to ' + o.toCong : '') + (o.time ? ', ' + fmtTime(o.time) : '') + (o.number ? ', #' + o.number + (o.title ? ' ' + o.title : '') : '');
+  }
+  var tLogN = 0;
+  function tLog(wk, text) {
+    if (!text) return Promise.resolve();
+    var m = me(), id = 'talk_log_' + Date.now().toString(36) + (tLogN++) + Math.random().toString(36).slice(2, 5);
+    return store.putTalk(id, { at: Date.now(), by: S.meId || '', byName: m ? m.name : '', wk: wk || '', text: text });
+  }
+  function tLogIn(date, old, now) {
+    var had = tFilled(old), has = tFilled(now);
+    if (!had && has) return tLog(date, 'Incoming added: ' + tDescIn(now));
+    if (had && !has) return tLog(date, 'Incoming removed: ' + tDescIn(old));
+    if (had && has && tKeyIn(old) !== tKeyIn(now)) return tLog(date, 'Incoming changed to ' + tDescIn(now) + ' (was ' + tDescIn(old) + ')');
+    return Promise.resolve();
+  }
+  function tLogOut(old, now) {
+    if (!old && now) return tLog(now.date, 'Outgoing added: ' + tDescOut(now));
+    if (old && !now) return tLog(old.date, 'Outgoing removed: ' + tDescOut(old));
+    if (old && now && tKeyOut(old) !== tKeyOut(now)) return tLog(now.date, 'Outgoing changed to ' + tDescOut(now) + (old.date !== now.date ? ' (moved from ' + tShort(old.date) + ')' : ' (was ' + tDescOut(old) + ')'));
+    return Promise.resolve();
+  }
+  function tLogHosp(date, oldG, newG) {
+    if (oldG === newG) return Promise.resolve();
+    return tLog(date, newG ? 'Hospitality: ' + tGroupLabel(newG) + (oldG ? ' (was ' + tGroupLabel(oldG) + ')' : '') : 'Hospitality cleared (was ' + tGroupLabel(oldG) + ')');
+  }
+  function tLogs() {
+    var docs = tDocs();
+    return Object.keys(docs).filter(function (k) { return k.indexOf('talk_log_') === 0; }).map(function (k) { return Object.assign({ id: k }, docs[k]); })
+      .sort(function (a, b) { return (a.at || 0) - (b.at || 0); });
+  }
+  function tPendingLogs() { var since = +tCfg().changesSentAt || 0; return tLogs().filter(function (l) { return (l.at || 0) > since; }); }
+  function tChangesTo() {
+    var c = tCfg(), p = c.changesTo && pub(c.changesTo);
+    if (p) return p;
+    return S.data.publishers.filter(function (x) { return x.rank === 'Elder' && /coordinator/i.test([x.roles, x.role, x.note].join(' ')) && !/talk/i.test([x.roles, x.role].join(' ')); })[0] || null;
+  }
+  function tLogLine(l) {
+    var d = l.wk ? parseDay(l.wk) : null;
+    return (d ? MON[d.getMonth()].slice(0, 3) + ' ' + d.getDate() + (d.getFullYear() !== new Date().getFullYear() ? ', ' + d.getFullYear() : '') + ' – ' : '') + l.text +
+      (l.by && l.by !== S.meId && l.byName ? ' (by ' + firstName(l.byName) + ')' : '');
+  }
+  function tChangesText() {
+    var to = tChangesTo(), m = me(), list = tPendingLogs().slice().sort(function (a, b) { return a.wk < b.wk ? -1 : a.wk > b.wk ? 1 : a.at - b.at; });
+    return 'Hi ' + (to ? firstName(to.name) : 'Brother') + ', here ' + (list.length === 1 ? 'is a change' : 'are the changes') + ' to the public talk schedule:\n' +
+      list.map(function (l) { return '• ' + tLogLine(l); }).join('\n') + '\nThank you!' + (m ? ' - ' + firstName(m.name) : '');
+  }
+  function tChangesCard() {
+    var list = tPendingLogs(), to = tChangesTo();
+    if (!list.length || (to && to.id === S.meId)) return '';
+    return '<div class="glass hosp-card rise"><div class="hosp-top"><span class="hosp-ico" aria-hidden="true">' + I.talks + '</span><span class="txt"><b>' + list.length + (list.length === 1 ? ' schedule change' : ' schedule changes') + ' not sent yet</b>' +
+      '<small>' + esc(list.slice(-2).map(tLogLine).join(' · ').slice(0, 120)) + (list.length > 2 ? '…' : '') + '</small></span></div>' +
+      '<div class="hosp-btns">' + (to && digits(to.phone).length >= 10 ? '<button class="cta" data-action="t-changes-send">Text ' + esc(firstName(to.name)) + ' the changes</button>' : '<button class="cta" data-action="t-changes">See the changes</button>') +
+      '<button class="quiet glass" data-action="t-changes">' + (to ? 'See all' : 'Choose') + '</button></div></div>';
+  }
+  function sheetTChanges() {
+    var pend = tPendingLogs(), sent = tLogs().filter(function (l) { return pend.indexOf(l) < 0; }).slice(-25).reverse(), to = tChangesTo();
+    var row = function (l) {
+      return '<div class="row-plain" style="align-items:flex-start"><span style="flex:1">' + esc(tLogLine(l)) + '</span><span style="white-space:nowrap;color:var(--fg2);font-size:13px">' + esc(fmtDate(ymd(new Date(l.at || 0)), true)) + '</span></div>';
+    };
+    return tHead('Schedule Changes') +
+      '<div class="glass list"><button class="cell" data-action="t-changes-to"><span class="txt"><b>Send changes to</b><small>' + esc(to ? to.name : 'Choose a brother') + '</small></span>' + I.chev + '</button></div>' +
+      '<h2 class="label">Not sent yet · ' + pend.length + '</h2>' + (pend.length ? '<div class="glass list">' + pend.map(row).join('') + '</div>' : '<div class="glass empty"><span>Nothing new since the last time.</span></div>') +
+      (pend.length && to ? '<button class="cta" data-action="t-changes-send">' + (digits(to.phone).length >= 10 ? 'Text ' + esc(firstName(to.name)) + ' the changes' : 'Copy the changes') + '</button>' : '') +
+      (pend.length ? '<button class="quiet glass" data-action="t-changes-done">Mark as sent without texting</button>' : '') +
+      (sent.length ? '<h2 class="label">Already sent</h2><div class="glass list">' + sent.map(row).join('') + '</div>' : '');
+  }
+  function sheetTChangesTo() {
+    var to = tChangesTo();
+    return tHead('Send Changes To', null, true) + '<div class="glass list">' + tSpeakers().filter(function (p) { return p.rank === 'Elder'; }).map(function (p) {
+      return '<button class="cell" data-action="t-changes-pick" data-id="' + esc(p.id) + '"><span class="txt"><b>' + esc(p.name) + '</b></span>' + (to && to.id === p.id ? '<span class="end">✓</span>' : '') + '</button>';
+    }).join('') + '</div>';
+  }
+  var TA_LOG = {
+    't-changes': function () { if (S.sheet) swapSheet({ type: 't-changes' }); else openSheet({ type: 't-changes' }); },
+    't-changes-to': function () { swapSheet({ type: 't-changes-to', back: { type: 't-changes' } }); },
+    't-changes-pick': function (el) { store.putTalk('talkcfg', Object.assign({}, tCfg(), { changesTo: el.dataset.id })).then(function () { tBack(); toast('Changes will go to ' + pub(el.dataset.id).name); }); },
+    't-changes-send': function () {
+      var to = tChangesTo(), txt = tChangesText(), stamp = Date.now();
+      var mark = function () { return store.putTalk('talkcfg', Object.assign({}, tCfg(), { changesSentAt: stamp })); };
+      if (to && digits(to.phone).length >= 10) { mark(); if (S.sheet) closeSheet(); window.location.href = smsLink([digits(to.phone)], txt); return; }
+      var done = function () { mark().then(function () { toast('Copied'); renderSheet(); }); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done, done); else done();
+    },
+    't-changes-done': function () { store.putTalk('talkcfg', Object.assign({}, tCfg(), { changesSentAt: Date.now() })).then(function () { toast('Marked as sent'); renderSheet(); }); }
+  };
+  Object.keys(TA_LOG).forEach(function (k) { TA[k] = TA_LOG[k]; });
 
   Object.keys(TA).forEach(function (k) { A[k] = TA[k]; });
   function gateCode(c) {
@@ -2327,7 +2452,8 @@
     if (p.patch && typeof p.patch === 'object') Object.keys(p.patch).forEach(function (id) {
       var cur = tDocs()[id];
       if (!/^talk_(in|out|hosp)_/.test(id) || !cur || typeof p.patch[id] !== 'object') return;
-      patched++; store.putTalk(id, Object.assign({}, cur, p.patch[id]));
+      patched++; var nw = Object.assign({}, cur, p.patch[id]); store.putTalk(id, nw);
+      if (id.indexOf('talk_in_') === 0) tLogIn(cur.date, cur, nw); else if (id.indexOf('talk_out_') === 0) tLogOut(cur, nw);
     });
     if (patched && !p.text && !p.titles && !p.hospOrder && !p.cfg) { S.tab = 'talks'; render(); toast(patched + (patched === 1 ? ' talk' : ' talks') + ' updated'); return; }
     if (p.hospOrder && p.hospOrder.length) {
@@ -2436,7 +2562,8 @@
         applyPendingPerson();
         applyPendingTalks();
         finishPastPlans();
-        if (S.sheet && (S.sheet.type === 'visit' || S.sheet.type === 'status' || S.sheet.type === 'group' || S.sheet.type === 'plan' || S.sheet.type === 't-week' || S.sheet.type === 't-settings')) renderSheet();
+        tFixTitles();
+        if (S.sheet && (S.sheet.type === 'visit' || S.sheet.type === 'status' || S.sheet.type === 'group' || S.sheet.type === 'plan' || S.sheet.type === 't-week' || S.sheet.type === 't-settings' || S.sheet.type === 't-changes')) renderSheet();
       });
     }
     render();
