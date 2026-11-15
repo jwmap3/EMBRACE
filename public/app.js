@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '5.13';
+  var VERSION = '5.14';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -292,6 +292,8 @@
   var IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   function smsLink(nums, body) {
     var b = encodeURIComponent(body);
+    nums = (nums || []).filter(Boolean);
+    if (!nums.length) return IOS ? 'sms:&body=' + b : 'sms:?body=' + b;   // no number: the person picks who it goes to
     if (IOS) return nums.length > 1 ? 'sms:/open?addresses=' + nums.join(',') + '&body=' + b : 'sms:' + nums[0] + '&body=' + b;
     return 'sms:' + nums.join(',') + '?body=' + b;
   }
@@ -602,7 +604,9 @@
         (num.length >= 10 ? '<div class="row-plain"><span>Phone</span><span>' + esc(fmtPhone(num)) + '</span></div>' : '') +
         (t.notes ? '<div class="row-plain" style="white-space:pre-wrap"><span>Notes</span><span>' + esc(t.notes) + '</span></div>' : '') +
         '<button class="action" data-action="t-in-edit" data-date="' + date + '">Edit</button>' +
-        (num.length >= 10 ? '<button class="action" data-action="t-in-text" data-date="' + date + '">Text ' + esc(t.type === 'local' ? firstName(t.speaker) : 'Brother ' + tLast(t.speaker)) + ' to confirm</button>' : '') + '</div>';
+        (t.type === 'visitor' && date >= todayStr() ? '<button class="action" data-action="t-spk-send" data-date="' + date + '">Send reminder' + (t.reminded ? ' again' : '') + '</button>' : '') +
+        (num.length >= 10 ? '<button class="action" data-action="t-in-text" data-date="' + date + '">Text ' + esc(t.type === 'local' ? firstName(t.speaker) : 'Brother ' + tLast(t.speaker)) + ' to confirm</button>' : '') + '</div>' +
+        (t.type === 'visitor' && t.reminded ? '<p class="foot" style="margin-top:-6px">Reminder sent ' + esc(fmtDate(t.reminded, true)) + '</p>' : '');
     } else {
       h += '<button class="cta" data-action="t-in-edit" data-date="' + date + '">' + I.plus + 'Assign the speaker</button>';
     }
@@ -686,6 +690,7 @@
       '<p class="foot" style="text-align:left;margin-top:-8px">' + (c.autoHosp !== false ? 'Each new upcoming speaker gets the next group in the order, after the group that had the weekend before. ' : '') + (c.remindId && c.remindId !== S.meId && pub(c.remindId) ? 'Reminders go to ' + esc(pub(c.remindId).name) + ' now. Turning this on moves them to you.' : 'Only you see these: from the Monday before each weekend, a ready text to the visiting speaker with our details and one to the hospitality group’s overseer, plus the schedule changes to send.') + '</p>' +
       '<h2 class="label">Our details for speakers</h2><div class="glass list">' +
         '<div class="field"><label for="t-hall">Kingdom Hall address</label><input id="t-hall" type="text" autocomplete="off" value="' + esc(c.hall || '') + '" placeholder="Street, city, state"></div>' +
+        '<div class="field"><label for="t-email">Email for talk media</label><input id="t-email" type="email" autocomplete="off" value="' + esc(c.mediaEmail || '') + '" placeholder="Where speakers send videos and pictures"></div>' +
         '<div class="field"><label for="t-zoom">Zoom (optional)</label><input id="t-zoom" type="text" autocomplete="off" value="' + esc(c.zoom || '') + '" placeholder="Meeting ID and passcode"></div></div>' +
       '<h2 class="label">Talk titles · ' + n + ' saved</h2><div class="glass"><textarea id="t-titles" style="min-height:200px" placeholder="One talk per line, number first:&#10;1 First title&#10;2 Second title"></textarea></div>' +
       '<p class="foot" style="text-align:left;margin-top:-8px">Paste your list of talk outlines here. After that, typing a talk number fills in its title.</p>' +
@@ -2228,31 +2233,35 @@
       .sort(function (a, b) { return a.date < b.date ? -1 : 1; });
   }
   function tSpeakerText(t) {
-    var c = tCfg(), m = me(), d = parseDay(t.date), days = Math.round((d - parseDay(todayStr())) / 864e5);
-    var when = (days >= 0 && days < 7 ? 'this ' : '') + DOW[d.getDay()] + ', ' + MON[d.getMonth()] + ' ' + d.getDate() + ' at ' + fmtTime(c.time);
-    return 'Hi Brother ' + tLast(t.speaker) + ', this is ' + (m ? m.name : 'the talk coordinator') + ', public talk coordinator for the ' + tCong() + '. ' +
-      'We look forward to your public talk ' + when + (tLabel(t) ? ': ' + tLabel(t) : '') + '. ' +
-      (c.hall ? 'Our Kingdom Hall is at ' + c.hall + '. ' : '') +
-      (c.zoom ? 'Zoom: ' + c.zoom + '. ' : '') +
-      'Please let me know if anything changes. Thank you!';
+    var c = tCfg(), m = me(), d = parseDay(t.date);
+    var lines = ['Hi Brother ' + tLast(t.speaker) + ', this is ' + (m ? m.name : 'the talk coordinator') + ', public talk coordinator for the ' + tCong() + '. Here is a reminder of your public talk with us:', '',
+      'Date: ' + DOW[d.getDay()] + ', ' + MON[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear(),
+      'Time: ' + fmtTime(c.time)];
+    if (t.number || t.title) lines.push('Talk: ' + tLabel(t));
+    if (c.hall) lines.push('Location: ' + tCong().replace(/ Congregation$/, '') + ' Kingdom Hall, ' + c.hall);
+    if (c.zoom) lines.push('Zoom: ' + c.zoom);
+    lines.push('');
+    if (c.mediaEmail) lines.push('If you have any media (videos or pictures) for your talk, please send it to my email: ' + c.mediaEmail);
+    lines.push('Please let me know if anything changes. Thank you!');
+    return lines.join('\n');
   }
   function tSpeakerCard() {
     return tSpeakerReminders().map(function (t) {
       var ph = digits(t.phone);
       return '<div class="glass hosp-card rise"><div class="hosp-top"><span class="hosp-ico" aria-hidden="true">' + I.talks + '</span><span class="txt"><b>Remind the speaker</b>' +
         '<small>Brother ' + esc(t.speaker) + (t.fromCong ? ' (' + esc(t.fromCong) + ')' : '') + ' gives the talk ' + esc(longDate(t.date)) + '</small></span></div>' +
-        '<div class="hosp-btns">' + (ph.length >= 10 ? '<button class="cta" data-action="t-spk-text" data-date="' + t.date + '">Text Brother ' + esc(tLast(t.speaker)) + '</button>'
-          : '<button class="cta" data-action="t-week" data-date="' + t.date + '">Add his number</button>') +
+        '<div class="hosp-btns"><button class="cta" data-action="t-spk-send" data-date="' + t.date + '">Send reminder</button>' +
         '<button class="quiet glass" data-action="t-spk-done" data-date="' + t.date + '">Done</button></div></div>';
     }).join('');
   }
   function tCoordCards() { return tHospCard() + tSpeakerCard(); }
   var TA_SPK = {
-    't-spk-text': function (el) {
+    // Opens Messages with the reminder ready; his number is filled in when we have it, otherwise you pick him.
+    't-spk-send': function (el) {
       var t = tIn(el.dataset.date); if (!t) return;
-      var ph = digits(t.phone); if (ph.length < 10) return toast('No phone number for Brother ' + tLast(t.speaker));
+      var ph = digits(t.phone);
       store.putTalk('talk_in_' + t.date, Object.assign({}, t, { reminded: todayStr() }));
-      window.location.href = smsLink([ph], tSpeakerText(t));
+      window.location.href = smsLink(ph.length >= 10 ? [ph] : [], tSpeakerText(t));
     },
     't-spk-done': function (el) {
       var t = tIn(el.dataset.date); if (!t) return;
@@ -2308,7 +2317,7 @@
     if (t.id === 'group-pick') { S.group = t.value; saveUi(); render(); }
     if (t.id === 's-cong') store.saveSettings({ congregationName: t.value.trim() });
     if (t.id === 's-od') store.saveSettings({ overdueDays: +t.value });
-    if (t.id === 't-hall' || t.id === 't-zoom') { var cf = {}; cf[t.id === 't-hall' ? 'hall' : 'zoom'] = t.value.trim(); store.putTalk('talkcfg', Object.assign({}, tCfg(), cf)).then(function () { toast('Saved'); }); }
+    if (t.id === 't-hall' || t.id === 't-zoom' || t.id === 't-email') { var cf = {}; cf[t.id === 't-hall' ? 'hall' : t.id === 't-zoom' ? 'zoom' : 'mediaEmail'] = t.value.trim(); store.putTalk('talkcfg', Object.assign({}, tCfg(), cf)).then(function () { toast('Saved'); }); }
     if (t.id === 't-time') { store.putTalk('talkcfg', Object.assign({}, tCfg(), { time: t.value || '10:00' })).then(function () { toast('Saved'); }); }
     if (t.id === 't-remind') A['t-remind']();
     if (t.id === 't-auto') store.putTalk('talkcfg', Object.assign({}, tCfg(), { autoHosp: !!t.checked })).then(function () { toast(t.checked ? 'Hospitality rotates automatically' : 'Rotation off'); renderSheet(); });
