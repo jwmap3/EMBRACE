@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '5.11';
+  var VERSION = '5.12';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -518,12 +518,15 @@
     var h = '<div class="screen"><div class="top"><h1 class="title">Talks</h1><span class="sub">Public talk schedule</span></div>' +
       '<div class="seg glass" role="group" aria-label="Show">' + [['year', 'Year'], ['in', 'Incoming'], ['out', 'Outgoing'], ['outlines', 'Outlines']].map(function (o) {
         return '<button data-action="t-part" data-part="' + o[0] + '" aria-pressed="' + (part === o[0]) + '">' + o[1] + '</button>';
-      }).join('') + '</div>';
+      }).join('') + '</div>' + tChangesCard();
     if (part === 'year') h += tYearView();
     else if (part === 'in') h += tInView();
     else if (part === 'outlines') h += tOutlinesView();
     else h += tOutView();
-    h += '<button class="quiet glass" data-action="t-import">' + I.plus + ' Import talks</button><button class="quiet glass" data-action="t-settings">Talk settings</button>';
+    var to = tChangesTo(), pc = tPendingLogs().length;
+    h += '<button class="quiet glass" data-action="t-import">' + I.plus + ' Import talks</button>' +
+      (to && to.id !== S.meId ? '<button class="quiet glass" data-action="t-changes">Changes for ' + esc(firstName(to.name)) + (pc ? ' · ' + pc + ' to send' : '') + '</button>' : '') +
+      '<button class="quiet glass" data-action="t-settings">Talk settings</button>';
     return h + '</div>';
   }
   function tYearView() {
@@ -537,7 +540,7 @@
       '<div class="duo"><div class="glass tile" style="cursor:default"><span class="tile-label">Incoming</span><b>' + have + '<small> of ' + wk.length + '</small></b>' +
       '<span class="bar"><i style="width:' + Math.round(have / wk.length * 100) + '%"></i></span><span class="tile-sub">weekends planned</span></div>' +
       '<div class="glass tile" style="cursor:default"><span class="tile-label">Outgoing</span><b>' + outCount + '</b><span class="tile-sub">talks by our brothers</span></div></div>';
-    h += tHospCard() + tChangesCard();
+    h += tHospCard();
     if (y === new Date().getFullYear() && soon.length) {
       h += '<button class="cta" data-action="t-week" data-date="' + soon[0] + '">' + I.plus + 'Fill ' + esc(longDate(soon[0])) + '</button>' +
         '<p class="foot" style="margin-top:-8px">' + soon.length + (soon.length === 1 ? ' weekend' : ' weekends') + ' in the next 3 months still need a speaker.</p>';
@@ -734,15 +737,21 @@
   var tFixing = {};
   function tFixTitles() {
     var map = tTitles(); if (Object.keys(map).length < 150) return;
-    var docs = tDocs();
+    var docs = tDocs(), n = 0;
     Object.keys(docs).forEach(function (k) {
       if (!/^talk_(in|out)_/.test(k)) return;
       var t = docs[k], right = t && t.number && map[t.number];
       if (!right || tOutlineRetired(right) || t.title === right || tFixing[k + right]) return;
-      tFixing[k + right] = true;
+      tFixing[k + right] = true; n++;
       store.putTalk(k, Object.assign({}, t, { title: right }));
+      tLog(t.date, (k.indexOf('talk_out_') === 0 ? 'Outgoing ' + ((pub(t.brotherId) || {}).name || t.brotherName || '') + ': ' : 'Incoming ' + (t.speaker || '') + ': ') +
+        'talk #' + t.number + ' is “' + right + '”' + (t.title ? ' (was listed as “' + t.title + '”)' : ''));
     });
+    if (!n) return;
+    tFixTotal += n; clearTimeout(tFixTimer);
+    tFixTimer = setTimeout(function () { toast(tFixTotal === 1 ? 'Fixed 1 talk title to match the outline list' : 'Fixed ' + tFixTotal + ' talk titles to match the outline list'); tFixTotal = 0; }, 700);
   }
+  var tFixTotal = 0, tFixTimer = null;
   function tBack() { var b = S.sheet && S.sheet.back; if (b) swapSheet(b); else closeSheet(); }
   var TA = {
     't-part': function (el) { S.tPart = el.dataset.part; render(); },
@@ -2101,13 +2110,13 @@
      Every change to the talk schedule is noted (doc talk_log_*: { at, by, byName, wk, text }).
      Changes made since the last "send" can go to one brother (talkcfg.changesTo, normally the
      coordinator) as a ready-made text, so his own schedule stays in step. */
-  function tKeyIn(t) { return t ? [t.type, t.speaker || '', t.fromCong || '', t.number || '', t.reason || ''].join('|') : ''; }
+  function tKeyIn(t) { return t ? [t.type, t.speaker || '', t.fromCong || '', t.number || '', t.title || '', t.reason || ''].join('|') : ''; }
   function tDescIn(t) {
     if (!t) return '';
     if (t.type === 'none') return 'No talk' + (t.reason ? ' (' + t.reason + ')' : '');
     return t.speaker + (t.type === 'local' ? ' (our speaker)' : t.fromCong ? ' (' + t.fromCong + ')' : '') + (t.number ? ', #' + t.number + (t.title ? ' ' + t.title : '') : '');
   }
-  function tKeyOut(o) { return o ? [o.brotherId, o.toCong || '', o.date, o.time || '', o.number || ''].join('|') : ''; }
+  function tKeyOut(o) { return o ? [o.brotherId, o.toCong || '', o.date, o.time || '', o.number || '', o.title || ''].join('|') : ''; }
   function tDescOut(o) {
     if (!o) return '';
     var b = pub(o.brotherId);
