@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '5.15';
+  var VERSION = '5.16';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -483,7 +483,9 @@
   }
   function tLabel(t) {
     if (!t) return '';
-    return [t.number ? '#' + t.number : '', t.title ? '“' + t.title + '”' : ''].filter(Boolean).join(' ');
+    // titles that already start with quotes (“Stay Awake”—Why and How?) aren't wrapped again
+    var title = t.title ? (/^["“”']/.test(t.title) ? t.title : '“' + t.title + '”') : '';
+    return [t.number ? '#' + t.number : '', title].filter(Boolean).join(' ');
   }
   function tFilled(t) { return !!(t && (t.type === 'none' || t.speaker)); }
   function tChip(date, past) {
@@ -2528,6 +2530,15 @@
       if (id.indexOf('talk_in_') === 0) tLogIn(cur.date, cur, nw); else if (id.indexOf('talk_out_') === 0) tLogOut(cur, nw);
     });
     if (patched && !p.text && !p.titles && !p.hospOrder && !p.cfg) { S.tab = 'talks'; render(); toast(patched + (patched === 1 ? ' talk' : ' talks') + ' updated'); return; }
+    // swap who goes on an outgoing talk: [{ date, from: "Name", to: "Name" }]
+    (p.outSwap || []).forEach(function (s) {
+      var fb = tFindBro(s.from), tb = tFindBro(s.to); if (!fb || !tb) return;
+      tOutAll().filter(function (o) { return o.date === s.date && o.brotherId === fb.id; }).forEach(function (o) {
+        var id = o.id, cur = Object.assign({}, tDocs()[id]), nw = Object.assign({}, cur, { brotherId: tb.id, brotherName: tb.name });
+        patched++; store.putTalk(id, nw); tLogOut(cur, nw);
+      });
+    });
+    if (patched && !p.text && !p.titles && !p.hospOrder && !p.cfg) { S.tab = 'talks'; S.tPart = 'out'; render(); toast(patched + (patched === 1 ? ' talk' : ' talks') + ' updated'); return; }
     if (p.hospOrder && p.hospOrder.length) {
       var ord = p.hospOrder.map(function (n) { return tGroupOf(n) || n; }).filter(function (g) { return tGroups().indexOf(g) >= 0; });
       if (ord.length) pendingCfg = Object.assign({}, pendingCfg || {}, { hospOrder: ord });
