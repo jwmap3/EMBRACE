@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '5.12';
+  var VERSION = '5.13';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -525,7 +525,7 @@
     else h += tOutView();
     var to = tChangesTo(), pc = tPendingLogs().length;
     h += '<button class="quiet glass" data-action="t-import">' + I.plus + ' Import talks</button>' +
-      (to && to.id !== S.meId ? '<button class="quiet glass" data-action="t-changes">Changes for ' + esc(firstName(to.name)) + (pc ? ' · ' + pc + ' to send' : '') + '</button>' : '') +
+      (to && to.id !== S.meId && tIsCoord() ? '<button class="quiet glass" data-action="t-changes">Changes for ' + esc(firstName(to.name)) + (pc ? ' · ' + pc + ' to send' : '') + '</button>' : '') +
       '<button class="quiet glass" data-action="t-settings">Talk settings</button>';
     return h + '</div>';
   }
@@ -540,7 +540,7 @@
       '<div class="duo"><div class="glass tile" style="cursor:default"><span class="tile-label">Incoming</span><b>' + have + '<small> of ' + wk.length + '</small></b>' +
       '<span class="bar"><i style="width:' + Math.round(have / wk.length * 100) + '%"></i></span><span class="tile-sub">weekends planned</span></div>' +
       '<div class="glass tile" style="cursor:default"><span class="tile-label">Outgoing</span><b>' + outCount + '</b><span class="tile-sub">talks by our brothers</span></div></div>';
-    h += tHospCard();
+    h += tCoordCards();
     if (y === new Date().getFullYear() && soon.length) {
       h += '<button class="cta" data-action="t-week" data-date="' + soon[0] + '">' + I.plus + 'Fill ' + esc(longDate(soon[0])) + '</button>' +
         '<p class="foot" style="margin-top:-8px">' + soon.length + (soon.length === 1 ? ' weekend' : ' weekends') + ' in the next 3 months still need a speaker.</p>';
@@ -682,8 +682,11 @@
       '<h2 class="label">Hospitality</h2><div class="glass list"><label class="field" for="t-auto"><span>Rotate groups automatically</span><input class="switch" id="t-auto" type="checkbox"' + (c.autoHosp !== false ? ' checked' : '') + '></label>' +
       (tHospOrder().length ? '<button class="cell" data-action="t-order"><span class="txt"><b>Rotation order</b><small>' + esc(tHospOrder().map(function (g) { var o = tOverseer(g); return o ? firstName(o.name) : g; }).join(' → ')) + ' → repeat</small></span>' + I.chev + '</button>' +
         (c.autoHosp !== false ? '<div class="row-plain"><span>Next up</span><span>' + esc(tGroupLabel(tNextHospGroup())) + '</span></div>' : '') : '') +
-      '<label class="field" for="t-remind"><span>Remind me to text the hospitality group</span><input class="switch" id="t-remind" type="checkbox"' + (c.remindId && c.remindId === S.meId ? ' checked' : '') + '></label></div>' +
-      '<p class="foot" style="text-align:left;margin-top:-8px">' + (c.autoHosp !== false ? 'Each new upcoming speaker gets the next group in the order, after the group that had the weekend before. ' : '') + (c.remindId && c.remindId !== S.meId && pub(c.remindId) ? 'Reminders go to ' + esc(pub(c.remindId).name) + ' now. Turning this on moves them to you.' : 'In the week before each weekend, Home shows a reminder with a ready-made text to that group’s overseer. Only you see it.') + '</p>' +
+      '<label class="field" for="t-remind"><span>I’m the talk coordinator (reminders for me)</span><input class="switch" id="t-remind" type="checkbox"' + (c.remindId && c.remindId === S.meId ? ' checked' : '') + '></label></div>' +
+      '<p class="foot" style="text-align:left;margin-top:-8px">' + (c.autoHosp !== false ? 'Each new upcoming speaker gets the next group in the order, after the group that had the weekend before. ' : '') + (c.remindId && c.remindId !== S.meId && pub(c.remindId) ? 'Reminders go to ' + esc(pub(c.remindId).name) + ' now. Turning this on moves them to you.' : 'Only you see these: from the Monday before each weekend, a ready text to the visiting speaker with our details and one to the hospitality group’s overseer, plus the schedule changes to send.') + '</p>' +
+      '<h2 class="label">Our details for speakers</h2><div class="glass list">' +
+        '<div class="field"><label for="t-hall">Kingdom Hall address</label><input id="t-hall" type="text" autocomplete="off" value="' + esc(c.hall || '') + '" placeholder="Street, city, state"></div>' +
+        '<div class="field"><label for="t-zoom">Zoom (optional)</label><input id="t-zoom" type="text" autocomplete="off" value="' + esc(c.zoom || '') + '" placeholder="Meeting ID and passcode"></div></div>' +
       '<h2 class="label">Talk titles · ' + n + ' saved</h2><div class="glass"><textarea id="t-titles" style="min-height:200px" placeholder="One talk per line, number first:&#10;1 First title&#10;2 Second title"></textarea></div>' +
       '<p class="foot" style="text-align:left;margin-top:-8px">Paste your list of talk outlines here. After that, typing a talk number fills in its title.</p>' +
       '<p class="err" id="ts-err" role="alert" hidden></p><button class="cta" data-action="t-titles-save">Save titles</button>';
@@ -784,6 +787,7 @@
         body.number = tVal('ti-num').replace(/\D/g, ''); body.title = tVal('ti-title'); body.notes = tVal('ti-notes');
       }
       var hg = '', old = tIn(sh.date) ? Object.assign({}, tIn(sh.date)) : null;
+      if (old && old.reminded && old.speaker === body.speaker) body.reminded = old.reminded;
       store.putTalk('talk_in_' + sh.date, body).then(function () { tLogIn(sh.date, old, body); return tSaveTitle(body.number, body.title); })
         .then(function () { return tAutoHosp(sh.date, body).then(function (g) { hg = g; if (g) tLogHosp(sh.date, '', g); }); })
         .then(function () { tBack(); toast(hg ? 'Saved · ' + tGroupLabel(hg) + ' has hospitality' : 'Saved'); }, function (e) { showErr('ti-err', window.EmbraceStore.friendly(e)); });
@@ -857,7 +861,7 @@
     var recent = S.data.visits.slice().sort(visitOrder).slice(0, 3);
 
     var h = '<div class="screen home">' +
-      '<div class="top rise"><span class="hello">' + greeting() + (m ? ', ' + esc(firstName(m.name)) : '') + '</span><h1 class="brand">Embrace</h1>' + (cong ? '<span class="sub">' + esc(cong) + '</span>' : '') + '</div>' + tHospCard();
+      '<div class="top rise"><span class="hello">' + greeting() + (m ? ', ' + esc(firstName(m.name)) : '') + '</span><h1 class="brand">Embrace</h1>' + (cong ? '<span class="sub">' + esc(cong) + '</span>' : '') + '</div>' + tCoordCards();
     // Until the congregation's list is in, the first thing on Home is the button to bring it in.
     if (S.data.publishers.length < 10) {
       h += '<div class="glass empty rise">' + sheep(70, 'bob') + '<b>Bring in your publishers</b>' +
@@ -2168,7 +2172,7 @@
   }
   function tChangesCard() {
     var list = tPendingLogs(), to = tChangesTo();
-    if (!list.length || (to && to.id === S.meId)) return '';
+    if (!list.length || !tIsCoord() || (to && to.id === S.meId)) return '';
     return '<div class="glass hosp-card rise"><div class="hosp-top"><span class="hosp-ico" aria-hidden="true">' + I.talks + '</span><span class="txt"><b>' + list.length + (list.length === 1 ? ' schedule change' : ' schedule changes') + ' not sent yet</b>' +
       '<small>' + esc(list.slice(-2).map(tLogLine).join(' · ').slice(0, 120)) + (list.length > 2 ? '…' : '') + '</small></span></div>' +
       '<div class="hosp-btns">' + (to && digits(to.phone).length >= 10 ? '<button class="cta" data-action="t-changes-send">Text ' + esc(firstName(to.name)) + ' the changes</button>' : '<button class="cta" data-action="t-changes">See the changes</button>') +
@@ -2206,6 +2210,56 @@
     't-changes-done': function () { store.putTalk('talkcfg', Object.assign({}, tCfg(), { changesSentAt: Date.now() })).then(function () { toast('Marked as sent'); renderSheet(); }); }
   };
   Object.keys(TA_LOG).forEach(function (k) { TA[k] = TA_LOG[k]; });
+
+  /* ---------------- Talks: coordinator reminders ----------------
+     The talk coordinator (talkcfg.remindId) is the only one who sees these prompts:
+     the hospitality reminder, the changes for the elder who keeps the schedule, and, from the Monday
+     before each weekend, a ready text to the visiting speaker with our details. */
+  function tIsCoord() { var c = tCfg(); return !!c.remindId && c.remindId === S.meId; }
+  function tSpeakerWindow(date) {
+    var d = parseDay(date), back = (d.getDay() + 6) % 7;   // days since the Monday of that week
+    return ymd(new Date(d.getFullYear(), d.getMonth(), d.getDate() - back));
+  }
+  function tSpeakerReminders() {
+    if (!tIsCoord()) return [];
+    var today = todayStr(), docs = tDocs();
+    return Object.keys(docs).filter(function (k) { return k.indexOf('talk_in_') === 0; }).map(function (k) { return docs[k]; })
+      .filter(function (t) { return t && t.type === 'visitor' && t.speaker && !t.reminded && t.date >= today && tSpeakerWindow(t.date) <= today; })
+      .sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+  }
+  function tSpeakerText(t) {
+    var c = tCfg(), m = me(), d = parseDay(t.date), days = Math.round((d - parseDay(todayStr())) / 864e5);
+    var when = (days >= 0 && days < 7 ? 'this ' : '') + DOW[d.getDay()] + ', ' + MON[d.getMonth()] + ' ' + d.getDate() + ' at ' + fmtTime(c.time);
+    return 'Hi Brother ' + tLast(t.speaker) + ', this is ' + (m ? m.name : 'the talk coordinator') + ', public talk coordinator for the ' + tCong() + '. ' +
+      'We look forward to your public talk ' + when + (tLabel(t) ? ': ' + tLabel(t) : '') + '. ' +
+      (c.hall ? 'Our Kingdom Hall is at ' + c.hall + '. ' : '') +
+      (c.zoom ? 'Zoom: ' + c.zoom + '. ' : '') +
+      'Please let me know if anything changes. Thank you!';
+  }
+  function tSpeakerCard() {
+    return tSpeakerReminders().map(function (t) {
+      var ph = digits(t.phone);
+      return '<div class="glass hosp-card rise"><div class="hosp-top"><span class="hosp-ico" aria-hidden="true">' + I.talks + '</span><span class="txt"><b>Remind the speaker</b>' +
+        '<small>Brother ' + esc(t.speaker) + (t.fromCong ? ' (' + esc(t.fromCong) + ')' : '') + ' gives the talk ' + esc(longDate(t.date)) + '</small></span></div>' +
+        '<div class="hosp-btns">' + (ph.length >= 10 ? '<button class="cta" data-action="t-spk-text" data-date="' + t.date + '">Text Brother ' + esc(tLast(t.speaker)) + '</button>'
+          : '<button class="cta" data-action="t-week" data-date="' + t.date + '">Add his number</button>') +
+        '<button class="quiet glass" data-action="t-spk-done" data-date="' + t.date + '">Done</button></div></div>';
+    }).join('');
+  }
+  function tCoordCards() { return tHospCard() + tSpeakerCard(); }
+  var TA_SPK = {
+    't-spk-text': function (el) {
+      var t = tIn(el.dataset.date); if (!t) return;
+      var ph = digits(t.phone); if (ph.length < 10) return toast('No phone number for Brother ' + tLast(t.speaker));
+      store.putTalk('talk_in_' + t.date, Object.assign({}, t, { reminded: todayStr() }));
+      window.location.href = smsLink([ph], tSpeakerText(t));
+    },
+    't-spk-done': function (el) {
+      var t = tIn(el.dataset.date); if (!t) return;
+      store.putTalk('talk_in_' + t.date, Object.assign({}, t, { reminded: todayStr() })).then(function () { toast('Marked as done'); });
+    }
+  };
+  Object.keys(TA_SPK).forEach(function (k) { TA[k] = TA_SPK[k]; });
 
   Object.keys(TA).forEach(function (k) { A[k] = TA[k]; });
   function gateCode(c) {
@@ -2254,6 +2308,7 @@
     if (t.id === 'group-pick') { S.group = t.value; saveUi(); render(); }
     if (t.id === 's-cong') store.saveSettings({ congregationName: t.value.trim() });
     if (t.id === 's-od') store.saveSettings({ overdueDays: +t.value });
+    if (t.id === 't-hall' || t.id === 't-zoom') { var cf = {}; cf[t.id === 't-hall' ? 'hall' : 'zoom'] = t.value.trim(); store.putTalk('talkcfg', Object.assign({}, tCfg(), cf)).then(function () { toast('Saved'); }); }
     if (t.id === 't-time') { store.putTalk('talkcfg', Object.assign({}, tCfg(), { time: t.value || '10:00' })).then(function () { toast('Saved'); }); }
     if (t.id === 't-remind') A['t-remind']();
     if (t.id === 't-auto') store.putTalk('talkcfg', Object.assign({}, tCfg(), { autoHosp: !!t.checked })).then(function () { toast(t.checked ? 'Hospitality rotates automatically' : 'Rotation off'); renderSheet(); });
