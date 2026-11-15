@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '5.14';
+  var VERSION = '5.15';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -2234,15 +2234,14 @@
   }
   function tSpeakerText(t) {
     var c = tCfg(), m = me(), d = parseDay(t.date);
-    var lines = ['Hi Brother ' + tLast(t.speaker) + ', this is ' + (m ? m.name : 'the talk coordinator') + ', public talk coordinator for the ' + tCong() + '. Here is a reminder of your public talk with us:', '',
+    var lines = ['Hi Brother ' + tLast(t.speaker) + ', this is ' + (m ? m.name : 'the talk coordinator') + ', talk coordinator for ' + tCong() + '. Here is a reminder of your public talk with us:',
       'Date: ' + DOW[d.getDay()] + ', ' + MON[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear(),
       'Time: ' + fmtTime(c.time)];
     if (t.number || t.title) lines.push('Talk: ' + tLabel(t));
     if (c.hall) lines.push('Location: ' + tCong().replace(/ Congregation$/, '') + ' Kingdom Hall, ' + c.hall);
     if (c.zoom) lines.push('Zoom: ' + c.zoom);
-    lines.push('');
     if (c.mediaEmail) lines.push('If you have any media (videos or pictures) for your talk, please send it to my email: ' + c.mediaEmail);
-    lines.push('Please let me know if anything changes. Thank you!');
+    lines.push('Please let me know if anything changes. Thank you, and looking forward to it!');
     return lines.join('\n');
   }
   function tSpeakerCard() {
