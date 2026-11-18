@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '5.18';
+  var VERSION = '5.19';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -1040,6 +1040,7 @@
       '<h2 class="label">Ministerial servants · ' + svs.length + '</h2><div class="glass list">' + svs.map(function (p) { return cell(p); }).join('') +
       '<button class="action" data-action="assign" data-rank="Ministerial Servant">Mark someone as a servant</button></div>' +
       '<p class="foot" style="text-align:left;margin-top:-8px">Elders and servants can be picked under "Who went with you?"</p>' +
+      viewFilesSection() +
       '<h2 class="label">Publishers</h2><div class="glass list">' +
       '<button class="action" data-action="new">Add a person</button>' +
       '<button class="action" data-action="import-pick">Import a list (CSV)</button>' +
@@ -1310,6 +1311,7 @@
     else if (sh.type === 't-import') body = sheetTImport(sh);
     else if (sh.type === 't-hosp') body = sheetTHosp(sh.date);
     else if (sh.type === 't-order') body = sheetTOrder(sh);
+    else if (sh.type === 'file') body = sheetFile(sh.id);
     else if (sh.type === 't-changes') body = sheetTChanges();
     else if (sh.type === 't-changes-to') body = sheetTChangesTo();
     else if (sh.type === 't-outline') body = sheetTOutline(sh.n);
@@ -2365,6 +2367,85 @@
   };
   Object.keys(TA_FORM).forEach(function (k) { TA[k] = TA_FORM[k]; });
 
+  /* ---------------- Settings: files to send others ----------------
+     PDFs kept in the congregation's database as link-only records (invites/<long random id>, kind "file"),
+     never in the app's code. Sending texts or emails a link (file.html#<id>) that anyone you send it to can
+     open without Embrace; where the phone allows, the PDF itself can be attached instead. */
+  var FILE_MAX = 700 * 1024;
+  function tFiles() {
+    var inv = S.data.invites || {};
+    return Object.keys(inv).filter(function (k) { return inv[k] && inv[k].kind === 'file'; }).map(function (k) { return Object.assign({ id: k }, inv[k]); })
+      .sort(function (a, b) { return (a.added || 0) - (b.added || 0); });
+  }
+  function fileTitle(f) { return f.title || String(f.name || 'File').replace(/\.[a-z0-9]+$/i, '').replace(/[_]+/g, ' ').trim(); }
+  function fileSize(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
+  function fileLink(id) { return location.origin + location.pathname.replace(/[^/]*$/, '') + 'file.html#' + id; }
+  function fileObj(f) {
+    var bin = atob(f.data || ''), bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    try { return new File([bytes], f.name || 'file.pdf', { type: f.type || 'application/pdf' }); } catch (e) { return new Blob([bytes], { type: f.type || 'application/pdf' }); }
+  }
+  function canShareFile(f) {
+    try { return !!(navigator.share && navigator.canShare && f && f.data && navigator.canShare({ files: [fileObj(f)] })); } catch (e) { return false; }
+  }
+  function fileMsg(f) { return 'Here is the ' + fileTitle(f) + ' from the ' + tCong() + ':\n' + fileLink(f.id); }
+  function viewFilesSection() {
+    var fs = tFiles();
+    return '<h2 class="label">Files to send others</h2><div class="glass list">' + fs.map(function (f) {
+      return '<button class="cell" data-action="file-open" data-id="' + esc(f.id) + '"><span class="datechip" aria-hidden="true"><b style="font-size:13px">PDF</b></span>' +
+        '<span class="txt"><b>' + esc(fileTitle(f)) + '</b><small>' + esc(fileSize(f.size || 0)) + ' · tap to text or email</small></span>' + I.chev + '</button>';
+    }).join('') +
+      '<label class="action" for="file-add" style="display:block;text-align:center;cursor:pointer">Add a file</label>' +
+      '<input id="file-add" type="file" accept="application/pdf,.pdf" hidden></div>' +
+      '<p class="foot" style="text-align:left;margin-top:-8px">Kept for all the elders. Sending gives the person a link to open or save the PDF; they don’t need Embrace.</p>';
+  }
+  function sheetFile(id) {
+    var raw = (S.data.invites || {})[id]; if (!raw) return '<div class="grab"></div><div class="glass empty"><span>That file was removed.</span></div>';
+    var f = Object.assign({ id: id }, raw), share = canShareFile(f);
+    return head(fileTitle(f), null, 'Close') +
+      '<p class="sub" style="text-align:center;margin:-6px 0 14px">PDF · ' + esc(fileSize(f.size || 0)) + (f.added ? ' · added ' + esc(fmtDate(ymd(new Date(f.added)), true)) : '') + '</p>' +
+      '<div class="hosp-btns" style="grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">' +
+        '<button class="cta" data-action="file-send" data-via="text" data-id="' + esc(id) + '">Text it</button>' +
+        '<button class="cta" data-action="file-send" data-via="email" data-id="' + esc(id) + '">Email it</button></div>' +
+      '<p class="foot" style="margin-top:0">Sends a link that opens the PDF. You choose who it goes to.</p>' +
+      '<div class="glass list">' + (share ? '<button class="action" data-action="file-share" data-id="' + esc(id) + '">Attach the PDF itself…</button>' : '') +
+        '<button class="action" data-action="file-view" data-id="' + esc(id) + '">Open the PDF</button></div>' +
+      '<div class="glass list">' + (S.sheet && S.sheet.confirm ? '<div class="row-plain"><span>Remove this file for everyone?</span></div><button class="action red" data-action="file-remove" data-id="' + esc(id) + '">Remove</button><button class="action" data-action="file-keep">Keep it</button>'
+        : '<button class="action red" data-action="file-confirm">Remove file</button>') + '</div>';
+  }
+  var TA_FILES = {
+    'file-open': function (el) { openSheet({ type: 'file', id: el.dataset.id }); },
+    'file-send': function (el) {
+      var raw = (S.data.invites || {})[el.dataset.id]; if (!raw) return;
+      var f = Object.assign({ id: el.dataset.id }, raw), msg = fileMsg(f);
+      if (el.dataset.via === 'email') window.location.href = 'mailto:?subject=' + encodeURIComponent(fileTitle(f) + ' – ' + tCong()) + '&body=' + encodeURIComponent(msg);
+      else window.location.href = smsLink([], msg);
+    },
+    'file-share': function (el) {
+      var f = Object.assign({ id: el.dataset.id }, (S.data.invites || {})[el.dataset.id] || {});
+      if (canShareFile(f)) navigator.share({ files: [fileObj(f)], title: fileTitle(f) }).catch(function () { /* closed */ });
+    },
+    // Opens the same page the person you send it to sees (works in the Android and PC apps too).
+    'file-view': function (el) { var u = fileLink(el.dataset.id), w = null; try { w = window.open(u, '_blank'); } catch (e) { w = null; } if (!w) window.location.href = u; },
+    'file-confirm': function () { S.sheet.confirm = true; renderSheet(); },
+    'file-keep': function () { S.sheet.confirm = false; renderSheet(); },
+    'file-remove': function (el) { store.removeInvite(el.dataset.id).then(function () { closeSheet(); toast('File removed'); }); }
+  };
+  Object.keys(TA_FILES).forEach(function (k) { TA[k] = TA_FILES[k]; });
+  function fileAdd(input) {
+    var file = input.files && input.files[0]; if (!file) return;
+    if (file.size > FILE_MAX) { toast('That file is too big (over 700 KB)'); input.value = ''; return; }
+    var r = new FileReader();
+    r.onload = function () {
+      var s = String(r.result), m = me(), id = tNewId() + tNewId().slice(0, 6);
+      store.putInvite(id, { kind: 'file', name: file.name, type: file.type || 'application/pdf', size: file.size, data: s.slice(s.indexOf(',') + 1),
+        cong: tCong(), added: Date.now(), by: S.meId || '', byName: m ? m.name : '' })
+        .then(function () { toast(fileTitle({ name: file.name }) + ' added'); }, function (e) { toast(window.EmbraceStore.friendly(e)); });
+      input.value = '';
+    };
+    r.readAsDataURL(file);
+  }
+
   Object.keys(TA).forEach(function (k) { A[k] = TA[k]; });
   function gateCode(c) {
     if (S.busy) return;
@@ -2412,6 +2493,7 @@
     if (t.id === 'group-pick') { S.group = t.value; saveUi(); render(); }
     if (t.id === 's-cong') store.saveSettings({ congregationName: t.value.trim() });
     if (t.id === 's-od') store.saveSettings({ overdueDays: +t.value });
+    if (t.id === 'file-add') fileAdd(t);
     if (t.id === 't-hall' || t.id === 't-zoom' || t.id === 't-email') { var cf = {}; cf[t.id === 't-hall' ? 'hall' : t.id === 't-zoom' ? 'zoom' : 'mediaEmail'] = t.value.trim(); store.putTalk('talkcfg', Object.assign({}, tCfg(), cf)).then(function () { toast('Saved'); }); }
     if (t.id === 't-time') { store.putTalk('talkcfg', Object.assign({}, tCfg(), { time: t.value || '10:00' })).then(function () { toast('Saved'); }); }
     if (t.id === 't-remind') A['t-remind']();

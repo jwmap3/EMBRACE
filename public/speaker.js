@@ -185,7 +185,7 @@
     return Promise.all([a.getInvite(id), a.getReply(id)]);
   }).then(function (r) {
     inv = r[0];
-    if (!inv) { fail('This link isn’t active', 'Please ask the talk coordinator to send it again.'); return; }
+    if (!inv || inv.kind === 'file' || !inv.date) { fail('This link isn’t active', 'Please ask the talk coordinator to send it again.'); return; }
     document.title = 'Your Public Talk · ' + (inv.cong || '');
     if (r[1]) { Object.keys(form).forEach(function (k) { if (r[1][k] != null) form[k] = String(r[1][k]); }); sent = true; }
     render();

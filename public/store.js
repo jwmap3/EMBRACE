@@ -68,6 +68,7 @@
       putTalk: function (id, body) { var d = load(); d.talks = d.talks || {}; d.talks[id] = Object.assign({}, body); return commit(); },
       removeTalk: function (id) { var d = load(); d.talks = d.talks || {}; delete d.talks[id]; return commit(); },
       putInvite: function (id, body) { var d = load(); d.invites = d.invites || {}; d.invites[id] = Object.assign({}, body); return commit(); },
+      removeInvite: function (id) { var d = load(); d.invites = d.invites || {}; delete d.invites[id]; return commit(); },
       updateReply: function (id, ch) { var d = load(); d.replies = d.replies || {}; if (d.replies[id]) d.replies[id] = Object.assign({}, d.replies[id], ch); return commit(); },
       // preview only: stands in for a speaker filling in his form
       _reply: function (id, body) { var d = load(); d.replies = d.replies || {}; d.replies[id] = Object.assign({}, body); return commit(); },
@@ -227,6 +228,7 @@
       putTalk: function (id, body) { return m.fs.setDoc(ref('settings/' + id), Object.assign({ kind: 'talk' }, body)); },
       removeTalk: function (id) { return m.fs.deleteDoc(ref('settings/' + id)); },
       putInvite: function (id, body) { return m.fs.setDoc(ref('invites/' + id), Object.assign({}, body, { updatedAt: m.fs.serverTimestamp() })); },
+      removeInvite: function (id) { return m.fs.deleteDoc(ref('invites/' + id)); },
       updateReply: function (id, ch) { return m.fs.updateDoc(ref('replies/' + id), ch); }
     };
   }

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Shared File</title>
+<meta name="description" content="A file shared by a congregation's elders.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#E6EEE7">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<style>
+:root {
+  --bg1: #DCE9E4; --bg2: #F7F1E3; --card: rgba(255, 255, 253, 0.88); --edge: rgba(255, 255, 255, 0.8);
+  --fg: #1D2620; --fg2: #5C665E; --fill: rgba(46, 72, 56, 0.07); --accent: #2F6E4C; --accent-ink: #fff;
+  --display: ui-serif, "New York", "Iowan Old Style", Palatino, Georgia, serif;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", Roboto, "Helvetica Neue", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg1: #0B1418; --bg2: #16282A; --card: rgba(28, 38, 36, 0.92); --edge: rgba(255, 255, 255, 0.08);
+    --fg: #EEF2EC; --fg2: #A2ADA4; --fill: rgba(255, 255, 255, 0.07); --accent: #7CC99A; --accent-ink: #0B1A12; color-scheme: dark; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: var(--font); color: var(--fg); background: linear-gradient(180deg, var(--bg1), var(--bg2)) fixed; min-height: 100vh; }
+main { max-width: 520px; margin: 0 auto; padding: max(40px, env(safe-area-inset-top)) 16px 48px; text-align: center; }
+.cong { color: var(--accent); font-weight: 700; letter-spacing: .05em; text-transform: uppercase; font-size: 13px; }
+h1 { font-family: var(--display); font-weight: 600; font-size: 28px; line-height: 1.2; margin: 8px 0 6px; }
+p { color: var(--fg2); font-size: 16px; margin: 0; line-height: 1.4; }
+.card { background: var(--card); border: 1px solid var(--edge); border-radius: 22px; box-shadow: 0 8px 28px rgba(38, 64, 48, .10); padding: 26px 20px; margin-top: 22px; }
+.doc { width: 72px; height: 90px; margin: 0 auto 14px; border-radius: 10px; background: var(--fill); display: grid; place-items: center; color: var(--accent); font-weight: 800; letter-spacing: .04em; }
+.cta { display: block; width: 100%; font: inherit; font-size: 18px; font-weight: 600; padding: 16px; border: 0; border-radius: 16px; background: var(--accent); color: var(--accent-ink); cursor: pointer; margin-top: 16px; text-decoration: none; }
+.cta.alt { background: var(--fill); color: var(--accent); margin-top: 10px; }
+</style>
+</head>
+<body>
+<main id="page" aria-live="polite"><h1>Opening…</h1></main>
+<script src="firebase-config.js?v=5.19"></script>
+<script>
+/* Opens a file the elders shared by link (file.html#<id>). Only the person with the link can open it. */
+(function () {
+  'use strict';
+  var FB = 'https://www.gstatic.com/firebasejs/10.12.2/', page = document.getElementById('page'), id = (location.hash || '').replace(/^#/, '');
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function fail(t, m) { page.innerHTML = '<h1>' + esc(t) + '</h1><p>' + esc(m) + '</p>'; }
+  function getFile() {
+    if (window.EMBRACE_FILE_MOCK) return window.EMBRACE_FILE_MOCK(id);
+    var cfg = window.EMBRACE_FIREBASE_CONFIG;
+    return Promise.all([import(FB + 'firebase-app.js'), import(FB + 'firebase-auth.js'), import(FB + 'firebase-firestore.js')]).then(function (m) {
+      var app = m[0].initializeApp(cfg, 'file'), auth = m[1].getAuth(app), db = m[2].getFirestore(app);
+      return new Promise(function (ok, bad) {
+        var stop = m[1].onAuthStateChanged(auth, function (u) {
+          if (!u) { m[1].signInAnonymously(auth).catch(bad); return; }
+          stop();
+          m[2].getDoc(m[2].doc(db, 'invites', id)).then(function (d) { ok(d.exists() ? d.data() : null); }, bad);
+        });
+      });
+    });
+  }
+  if (!id) { fail('Link not complete', 'Please open the full link you were sent.'); return; }
+  getFile().then(function (f) {
+    if (!f || f.kind !== 'file' || !f.data) { fail('This file isn’t available', 'Please ask for the link again.'); return; }
+    var title = f.title || String(f.name || 'File').replace(/\.[a-z0-9]+$/i, '').replace(/_+/g, ' ');
+    var bin = atob(f.data), bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    var url = URL.createObjectURL(new Blob([bytes], { type: f.type || 'application/pdf' }));
+    document.title = title;
+    page.innerHTML = (f.cong ? '<div class="cong">' + esc(f.cong) + '</div>' : '') + '<h1>' + esc(title) + '</h1><p>Shared with you by the elders.</p>' +
+      '<div class="card"><div class="doc" aria-hidden="true">PDF</div>' +
+      '<a class="cta" href="' + url + '" download="' + esc(f.name || 'file.pdf') + '">Download the PDF</a>' +
+      '<a class="cta alt" href="' + url + '" target="_blank" rel="noopener">Open it</a></div>';
+  }).catch(function () { fail('Couldn’t open', 'Check your internet connection and open the link again.'); });
+})();
+</script>
+</body>
+</html>
