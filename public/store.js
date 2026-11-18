@@ -8,7 +8,7 @@
 
   var FB = 'https://www.gstatic.com/firebasejs/10.12.2/';
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
-  function blank() { return { publishers: [], visits: [], plans: [], talks: {}, settings: { overdueDays: 365 } }; }
+  function blank() { return { publishers: [], visits: [], plans: [], talks: {}, invites: {}, replies: {}, settings: { overdueDays: 365 } }; }
 
   /* ---------------- Preview / local store ---------------- */
   function LocalStore(seed) {
@@ -29,7 +29,7 @@
     function save() { try { localStorage.setItem(KEY, JSON.stringify(mem)); } catch (e) { /* blocked: memory only */ } }
     function emit() {
       var d = load();
-      listeners.forEach(function (cb) { cb({ publishers: d.publishers.slice(), visits: d.visits.slice(), plans: (d.plans || []).slice(), talks: Object.assign({}, d.talks || {}), settings: d.settings }); });
+      listeners.forEach(function (cb) { cb({ publishers: d.publishers.slice(), visits: d.visits.slice(), plans: (d.plans || []).slice(), talks: Object.assign({}, d.talks || {}), invites: Object.assign({}, d.invites || {}), replies: Object.assign({}, d.replies || {}), settings: d.settings }); });
     }
     function commit() { save(); emit(); return Promise.resolve(); }
 
@@ -67,6 +67,10 @@
       saveSettings: function (s) { var d = load(); d.settings = Object.assign({}, d.settings, s); return commit(); },
       putTalk: function (id, body) { var d = load(); d.talks = d.talks || {}; d.talks[id] = Object.assign({}, body); return commit(); },
       removeTalk: function (id) { var d = load(); d.talks = d.talks || {}; delete d.talks[id]; return commit(); },
+      putInvite: function (id, body) { var d = load(); d.invites = d.invites || {}; d.invites[id] = Object.assign({}, body); return commit(); },
+      updateReply: function (id, ch) { var d = load(); d.replies = d.replies || {}; if (d.replies[id]) d.replies[id] = Object.assign({}, d.replies[id], ch); return commit(); },
+      // preview only: stands in for a speaker filling in his form
+      _reply: function (id, body) { var d = load(); d.replies = d.replies || {}; d.replies[id] = Object.assign({}, body); return commit(); },
       addPlan: function (x) { var d = load(); d.plans = d.plans || []; d.plans.push(Object.assign({ id: 'plan_' + uid(), createdAt: Date.now() }, x)); return commit(); },
       deletePlan: function (id) { var d = load(); d.plans = (d.plans || []).filter(function (x) { return x.id !== id; }); return commit(); },
       completePlan: function (id, list) {
@@ -85,7 +89,7 @@
     var listeners = [], unsubs = [], data = blank(), stateCb = null, gotPublishers = false;
 
     function emit() {
-      listeners.forEach(function (cb) { cb({ publishers: data.publishers, visits: data.visits, plans: data.plans || [], talks: data.talks || {}, settings: data.settings, ready: gotPublishers }); });
+      listeners.forEach(function (cb) { cb({ publishers: data.publishers, visits: data.visits, plans: data.plans || [], talks: data.talks || {}, invites: data.invites || {}, replies: data.replies || {}, settings: data.settings, ready: gotPublishers }); });
     }
     function ref(path) { return m.fs.doc.apply(null, [db].concat(path.split('/'))); }
     function col(name) { return m.fs.collection(db, name); }
@@ -110,6 +114,10 @@
         });
         data.settings = Object.assign({ overdueDays: 365 }, st); data.plans = pl; data.talks = tk; emit();
       }));
+      // Speaker forms: one invite per weekend link, one reply per invite. (Quiet if the rules for these aren't published yet.)
+      function byId(key) { return function (snap) { var o = {}; snap.docs.forEach(function (d) { o[d.id] = d.data(); }); data[key] = o; emit(); }; }
+      unsubs.push(m.fs.onSnapshot(col('invites'), byId('invites'), function () { /* rules not published yet */ }));
+      unsubs.push(m.fs.onSnapshot(col('replies'), byId('replies'), function () { /* rules not published yet */ }));
     }
 
     // Firestore accepts up to 500 writes per batch; stay well under it.
@@ -217,7 +225,9 @@
         return b.commit();
       },
       putTalk: function (id, body) { return m.fs.setDoc(ref('settings/' + id), Object.assign({ kind: 'talk' }, body)); },
-      removeTalk: function (id) { return m.fs.deleteDoc(ref('settings/' + id)); }
+      removeTalk: function (id) { return m.fs.deleteDoc(ref('settings/' + id)); },
+      putInvite: function (id, body) { return m.fs.setDoc(ref('invites/' + id), Object.assign({}, body, { updatedAt: m.fs.serverTimestamp() })); },
+      updateReply: function (id, ch) { return m.fs.updateDoc(ref('replies/' + id), ch); }
     };
   }
 

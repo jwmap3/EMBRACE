@@ -52,6 +52,33 @@ service cloud.firestore {
       allow read, write: if unlocked();
     }
 
+    // Speaker forms. An unlocked phone makes one invite per weekend (link: speaker.html#<invite id>).
+    // A visiting speaker is signed in silently but never unlocked: he can open only his own invite
+    // (by its long random id) and save only his own reply to it. He can't list or read anything else.
+    function validReply() {
+      return request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid', 'attending', 'phone', 'hosp', 'hospCount', 'diet', 'song', 'media', 'notes', 'at', 'applied', 'seen'])
+        && request.resource.data.attending in ['yes', 'no']
+        && request.resource.data.phone is string && request.resource.data.phone.size() < 40
+        && request.resource.data.hosp in ['yes', 'no', '']
+        && request.resource.data.hospCount is string && request.resource.data.hospCount.size() < 10
+        && request.resource.data.diet is string && request.resource.data.diet.size() < 500
+        && request.resource.data.song is string && request.resource.data.song.size() < 10
+        && request.resource.data.media in ['yes', 'no', '']
+        && request.resource.data.notes is string && request.resource.data.notes.size() < 2000
+        && request.resource.data.at is number;
+    }
+    match /invites/{id} {
+      allow get: if signedIn();
+      allow list, create, update, delete: if unlocked();
+    }
+    match /replies/{id} {
+      allow list, delete: if unlocked();
+      allow get: if unlocked() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow create: if signedIn() && exists(/databases/$(database)/documents/invites/$(id)) && validReply();
+      allow update: if unlocked() || (signedIn() && resource.data.uid == request.auth.uid && validReply());
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

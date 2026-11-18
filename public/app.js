@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '5.16';
+  var VERSION = '5.18';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -612,7 +612,7 @@
     } else {
       h += '<button class="cta" data-action="t-in-edit" data-date="' + date + '">' + I.plus + 'Assign the speaker</button>';
     }
-    h += tHospSection(date);
+    h += tFormSection(date) + tHospSection(date);
     return h + '<h2 class="label">Our brothers away</h2>' + (outs.length ? '<div class="glass list">' + outs.map(tOutRow).join('') + '</div>' : '') +
       '<button class="quiet glass" data-action="t-out-new" data-date="' + date + '">' + I.plus + ' Add an outgoing talk</button>';
   }
@@ -795,6 +795,10 @@
       }
       var hg = '', old = tIn(sh.date) ? Object.assign({}, tIn(sh.date)) : null;
       if (old && old.reminded && old.speaker === body.speaker) body.reminded = old.reminded;
+      if (old && old.inviteId && old.speaker === body.speaker) {
+        body.inviteId = old.inviteId; if (old.reply) body.reply = old.reply;
+        store.putInvite(old.inviteId, tInviteBody(body));
+      }
       store.putTalk('talk_in_' + sh.date, body).then(function () { tLogIn(sh.date, old, body); return tSaveTitle(body.number, body.title); })
         .then(function () { return tAutoHosp(sh.date, body).then(function (g) { hg = g; if (g) tLogHosp(sh.date, '', g); }); })
         .then(function () { tBack(); toast(hg ? 'Saved · ' + tGroupLabel(hg) + ' has hospitality' : 'Saved'); }, function (e) { showErr('ti-err', window.EmbraceStore.friendly(e)); });
@@ -1934,7 +1938,10 @@
     var d = parseDay(date), days = Math.round((d - parseDay(todayStr())) / 864e5);
     var when = (days >= 0 && days < 7 ? 'this ' + DOW[d.getDay()] : 'on ' + DOW[d.getDay()]) + ', ' + MON[d.getMonth()] + ' ' + d.getDate();
     var who = t && t.speaker ? (t.type === 'local' ? ', when Brother ' + t.speaker + ' gives the public talk' : ' for our visiting speaker, Brother ' + t.speaker + (t.fromCong ? ' from ' + t.fromCong : '')) : '';
-    return 'Hi ' + (o ? firstName(o.name) : 'Brother') + ', just a friendly reminder that your group has hospitality ' + when + who + '. The meeting starts at ' + fmtTime(c.time) + '. Thank you!' + (m ? ' - ' + firstName(m.name) : '');
+    var r = t && t.reply, ans = '';
+    if (r && r.hosp === 'yes') ans = ' He has accepted hospitality' + (r.hospCount ? ' for ' + r.hospCount + (r.hospCount === '1' ? ' person' : ' people') : '') + (r.diet ? ' (food needs: ' + r.diet + ')' : '') + '.';
+    else if (r && r.hosp === 'no') ans = ' He let us know he won’t need hospitality this time.';
+    return 'Hi ' + (o ? firstName(o.name) : 'Brother') + ', just a friendly reminder that your group has hospitality ' + when + who + '. The meeting starts at ' + fmtTime(c.time) + '.' + ans + ' Thank you!' + (m ? ' - ' + firstName(m.name) : '');
   }
   // The reminder card: only for the brother who turned reminders on, during the week before.
   function tHospReminders() {
@@ -2255,7 +2262,7 @@
         '<button class="quiet glass" data-action="t-spk-done" data-date="' + t.date + '">Done</button></div></div>';
     }).join('');
   }
-  function tCoordCards() { return tHospCard() + tSpeakerCard(); }
+  function tCoordCards() { return tReplyCards() + tHospCard() + tSpeakerCard(); }
   var TA_SPK = {
     // Opens Messages with the reminder ready; his number is filled in when we have it, otherwise you pick him.
     't-spk-send': function (el) {
@@ -2270,6 +2277,93 @@
     }
   };
   Object.keys(TA_SPK).forEach(function (k) { TA[k] = TA_SPK[k]; });
+
+  /* ---------------- Talks: speaker form ----------------
+     From a weekend's card, send the visiting speaker his own link (speaker.html#<invite id>). The invite
+     carries that weekend's details (his name, outline, our time, hall, Zoom, media email, contact).
+     His answers come back as a reply, are written onto that weekend, and the talk coordinator is told. */
+  function tNewId() {
+    var a = new Uint8Array(18), s = '';
+    try { crypto.getRandomValues(a); } catch (e) { for (var j = 0; j < a.length; j++) a[j] = Math.floor(Math.random() * 256); }
+    for (var i = 0; i < a.length; i++) s += 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'.charAt(a[i] % 57);
+    return s;
+  }
+  function tFormLink(id) { return location.origin + location.pathname.replace(/[^/]*$/, '') + 'speaker.html#' + id; }
+  function tInviteBody(t) {
+    var c = tCfg(), co = (c.remindId && pub(c.remindId)) || me();
+    return { date: t.date, speaker: t.speaker || '', fromCong: t.fromCong || '', number: t.number || '', title: t.title || '',
+      time: fmtTime(c.time), hall: c.hall || '', hallName: tCong().replace(/\s+Congregation$/i, '') + ' Kingdom Hall', zoom: c.zoom || '',
+      mediaEmail: c.mediaEmail || '', coordName: co ? co.name : '', coordPhone: co ? digits(co.phone) : '', cong: tCong(), by: S.meId || '' };
+  }
+  function tReplyOf(t) { return t && t.inviteId ? (S.data.replies || {})[t.inviteId] || null : null; }
+  function tReplySummary(r) {
+    if (!r) return '';
+    if (r.attending === 'no') return 'Needs to reschedule';
+    return ['Will be there', r.hosp === 'yes' ? 'Hospitality: yes' + (r.hospCount ? ', ' + r.hospCount + (r.hospCount === '1' ? ' person' : ' people') : '') : r.hosp === 'no' ? 'No hospitality' : '',
+      r.song ? 'Song ' + r.song : '', r.media === 'yes' ? 'Media: will email' : r.media === 'no' ? 'No media' : ''].filter(Boolean).join(' · ');
+  }
+  function tFormText(t, id) {
+    var m = me(), d = parseDay(t.date);
+    return 'Hi Brother ' + tLast(t.speaker) + ', this is ' + (m ? m.name : 'the talk coordinator') + ', talk coordinator for ' + tCong() + '. ' +
+      'Here are the details for your public talk with us on ' + DOW[d.getDay()] + ', ' + MON[d.getMonth()] + ' ' + d.getDate() + ', with a few quick questions:\n' +
+      tFormLink(id) + '\nThank you, and looking forward to it!';
+  }
+  // The weekend card's speaker-form section.
+  function tFormSection(date) {
+    var t = tIn(date); if (!t || t.type !== 'visitor' || !t.speaker) return '';
+    var r = tReplyOf(t), sentTo = t.inviteId && (S.data.invites || {})[t.inviteId];
+    var h = '<h2 class="label">Speaker form</h2><div class="glass list">';
+    if (r) {
+      var row = function (k, v) { return v ? '<div class="row-plain"><span>' + k + '</span><span>' + esc(v) + '</span></div>' : ''; };
+      h += row('Coming', r.attending === 'no' ? 'Needs to reschedule' : 'Yes') +
+        row('Hospitality', r.hosp === 'yes' ? 'Yes' + (r.hospCount ? ', ' + r.hospCount + (r.hospCount === '1' ? ' person' : ' people') : '') : r.hosp === 'no' ? 'No, thank you' : '') +
+        row('Food needs', r.hosp === 'yes' ? r.diet : '') + row('Song', r.song) +
+        row('Media', r.media === 'yes' ? 'He’ll email it' : r.media === 'no' ? 'None' : '') + row('Phone', r.phone ? fmtPhone(digits(r.phone)) || r.phone : '') +
+        (r.notes ? '<div class="row-plain" style="white-space:pre-wrap"><span>Notes</span><span>' + esc(r.notes) + '</span></div>' : '') +
+        '<div class="row-plain"><span>Answered</span><span>' + esc(fmtDate(ymd(new Date(r.at || 0)), true)) + '</span></div>';
+    } else if (sentTo) h += '<div class="row-plain"><span>Sent</span><span>Waiting for his answers</span></div>';
+    if (date >= todayStr()) h += '<button class="action" data-action="t-form-send" data-date="' + date + '">' + (sentTo ? 'Send the form again' : 'Send the speaker form') + '</button>';
+    return h + '</div>' + (!sentTo ? '<p class="foot" style="margin-top:-6px">He gets his own link with your details and asks about hospitality, his song and media. His answers show up here.</p>' : '');
+  }
+  // New answers are written onto that weekend once (any unlocked phone may do it).
+  var tApplying = {};
+  function tApplyReplies() {
+    var reps = S.data.replies || {}, invs = S.data.invites || {};
+    Object.keys(reps).forEach(function (id) {
+      var r = reps[id], inv = invs[id]; if (!r || !inv || !inv.date || (r.applied || 0) >= (r.at || 0) || tApplying[id + r.at]) return;
+      var t = tIn(inv.date); if (!t || t.inviteId !== id) return;
+      tApplying[id + r.at] = true;
+      var nw = Object.assign({}, t, { confirmed: r.attending === 'yes', reply: { attending: r.attending, hosp: r.hosp, hospCount: r.hospCount, diet: r.diet, song: r.song, media: r.media, notes: r.notes, at: r.at } });
+      if (r.phone && digits(r.phone).length >= 10) nw.phone = digits(r.phone);
+      store.putTalk('talk_in_' + inv.date, nw).then(function () { return store.updateReply(id, { applied: r.at, seen: false }); });
+      if (r.attending === 'no') tLog(inv.date, 'Brother ' + t.speaker + ' needs to reschedule (speaker form)');
+    });
+  }
+  // The coordinator is told about each new answer.
+  function tReplyCards() {
+    if (!tIsCoord()) return '';
+    var reps = S.data.replies || {}, invs = S.data.invites || {};
+    return Object.keys(reps).filter(function (id) { var r = reps[id]; return r && r.applied && !r.seen && invs[id]; })
+      .sort(function (a, b) { return (reps[a].at || 0) - (reps[b].at || 0); }).map(function (id) {
+        var r = reps[id], inv = invs[id];
+        return '<div class="glass hosp-card rise"><div class="hosp-top"><span class="hosp-ico" aria-hidden="true">' + I.talks + '</span><span class="txt"><b>' +
+          esc('Brother ' + inv.speaker + (r.attending === 'no' ? ' needs to reschedule' : ' answered the speaker form')) + '</b><small>' +
+          esc(longDate(inv.date) + ' · ' + tReplySummary(r)) + '</small></span></div>' +
+          '<div class="hosp-btns"><button class="cta" data-action="t-week" data-date="' + inv.date + '">Open the weekend</button>' +
+          '<button class="quiet glass" data-action="t-reply-seen" data-id="' + esc(id) + '">Got it</button></div></div>';
+      }).join('');
+  }
+  var TA_FORM = {
+    't-form-send': function (el) {
+      var date = el.dataset.date, t = tIn(date); if (!t || !t.speaker) return;
+      var id = t.inviteId || tNewId(), ph = digits(t.phone);
+      store.putInvite(id, tInviteBody(t));
+      if (t.inviteId !== id) store.putTalk('talk_in_' + date, Object.assign({}, t, { inviteId: id }));
+      window.location.href = smsLink(ph.length >= 10 ? [ph] : [], tFormText(t, id));
+    },
+    't-reply-seen': function (el) { store.updateReply(el.dataset.id, { seen: true }); }
+  };
+  Object.keys(TA_FORM).forEach(function (k) { TA[k] = TA_FORM[k]; });
 
   Object.keys(TA).forEach(function (k) { A[k] = TA[k]; });
   function gateCode(c) {
@@ -2555,7 +2649,7 @@
       });
       if (!p.text) return;
     }
-    if (!p.text && !p.titles && (pendingCfg || p.cfg)) {
+    if (!p.text && !p.titles && !(p.in && p.in.length) && (pendingCfg || p.cfg)) {
       store.putTalk('talkcfg', Object.assign({}, tCfg(), p.cfg || {}, pendingCfg || {})).then(function () {
         S.tab = 'talks'; render(); toast('Talk settings updated');
       });
@@ -2637,7 +2731,7 @@
     if (st.status === 'ready' && !subscribed) {
       subscribed = true;
       store.subscribe(function (d) {
-        S.data = { publishers: d.publishers.map(norm), visits: d.visits, settings: d.settings, plans: d.plans || [], talks: d.talks || {} };
+        S.data = { publishers: d.publishers.map(norm), visits: d.visits, settings: d.settings, plans: d.plans || [], talks: d.talks || {}, invites: d.invites || {}, replies: d.replies || {} };
         S.loaded = d.ready !== false; rebuild();
         if (S.meId && S.loaded && !pub(S.meId)) { S.meId = null; lsSet('embrace-me', null); }
         render();
@@ -2646,6 +2740,7 @@
         applyPendingTalks();
         finishPastPlans();
         tFixTitles();
+        tApplyReplies();
         if (S.sheet && (S.sheet.type === 'visit' || S.sheet.type === 'status' || S.sheet.type === 'group' || S.sheet.type === 'plan' || S.sheet.type === 't-week' || S.sheet.type === 't-settings' || S.sheet.type === 't-changes')) renderSheet();
       });
     }
