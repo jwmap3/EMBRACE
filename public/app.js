@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '5.19';
+  var VERSION = '5.20';
   // A person has one privilege, an optional pioneer status, and any number of roles.
   var RANKS = ['Elder', 'Ministerial Servant', 'Publisher', 'Unbaptized Publisher', 'Inactive', 'Removed'];
   var PIONEERS = ['', 'Auxiliary Pioneer', 'Regular Pioneer', 'Special Pioneer'];
@@ -2327,6 +2327,18 @@
     if (date >= todayStr()) h += '<button class="action" data-action="t-form-send" data-date="' + date + '">' + (sentTo ? 'Send the form again' : 'Send the speaker form') + '</button>';
     return h + '</div>' + (!sentTo ? '<p class="foot" style="margin-top:-6px">He gets his own link with your details and asks about hospitality, his song and media. His answers show up here.</p>' : '');
   }
+  // Links already sent show our current details (time, hall, Zoom, media email, contact) and his outline.
+  var tInvKeys = ['speaker', 'number', 'title', 'time', 'hall', 'zoom', 'mediaEmail', 'coordName', 'coordPhone'], tInvDone = {};
+  function tRefreshInvites() {
+    var invs = S.data.invites || {}, today = todayStr();
+    Object.keys(invs).forEach(function (id) {
+      var inv = invs[id]; if (!inv || inv.kind === 'file' || !inv.date || inv.date < today) return;
+      var t = tIn(inv.date); if (!t || t.inviteId !== id || !t.speaker) return;
+      var want = tInviteBody(t), sig = tInvKeys.map(function (k) { return want[k]; }).join('|');
+      if (tInvKeys.every(function (k) { return (inv[k] || '') === (want[k] || ''); }) || tInvDone[id] === sig) return;
+      tInvDone[id] = sig; store.putInvite(id, want);
+    });
+  }
   // New answers are written onto that weekend once (any unlocked phone may do it).
   var tApplying = {};
   function tApplyReplies() {
@@ -2823,6 +2835,7 @@
         finishPastPlans();
         tFixTitles();
         tApplyReplies();
+        tRefreshInvites();
         if (S.sheet && (S.sheet.type === 'visit' || S.sheet.type === 'status' || S.sheet.type === 'group' || S.sheet.type === 'plan' || S.sheet.type === 't-week' || S.sheet.type === 't-settings' || S.sheet.type === 't-changes')) renderSheet();
       });
     }
